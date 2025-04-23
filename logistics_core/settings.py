@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     'fleet',
     'assignment',
     'monitoring',
+    'drf_yasg',
 ]
 
 MIDDLEWARE = [
