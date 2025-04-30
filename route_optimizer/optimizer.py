@@ -86,7 +86,6 @@ class RouteOptimizer:
             routing_enums_pb2.FirstSolutionStrategy.GLOBAL_CHEAPEST_ARC
         )
         search_params.time_limit.FromSeconds(10)
-        print("Solving with OR-Tools...")
         solution = routing.SolveWithParameters(search_params)
         return self.format_solution(data, manager, routing, solution)
 
