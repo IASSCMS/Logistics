@@ -42,6 +42,7 @@ INSTALLED_APPS = [
     'assignment',
     'monitoring',
     'drf_yasg',
+    'route_optimizer',
 ]
 
 MIDDLEWARE = [
