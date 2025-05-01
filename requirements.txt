@@ -1,6 +1,7 @@
 absl-py==2.2.2
 asgiref==3.8.1
 Django==5.2
+django-filter==25.1
 djangorestframework==3.16.0
 drf-yasg==1.21.10
 immutabledict==4.2.1
