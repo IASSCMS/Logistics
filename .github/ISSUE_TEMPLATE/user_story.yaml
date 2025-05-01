@@ -1,0 +1,29 @@
+name: 📚 User Story
+description: Template for creating a user story with acceptance criteria
+title: "[Story]: "
+labels: [user story]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **As a** [role]  
+        **I need** [function]  
+        **So that** [benefit]  
+
+        ---
+  - type: textarea
+    id: details
+    attributes:
+      label: Details and Assumptions
+      description: Add any known information, notes, or assumptions here.
+      placeholder: "* Document what you know..."
+  - type: markdown
+    attributes:
+      value: |
+        ### Acceptance Criteria
+
+        ```gherkin
+        Given [some context]
+        When [certain action is taken]
+        Then [the outcome of action is observed]
+        ```
