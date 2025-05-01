@@ -1,7 +1,6 @@
 from django.test import TestCase
 
 # Create your tests here.
-from django.test import TestCase
 from route_optimizer.optimizer import RouteOptimizer
 
 class RouteOptimizerTest(TestCase):
