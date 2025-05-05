@@ -43,6 +43,7 @@ class ORToolsVRPSolver:
         deliveries: List[Delivery],
         depot_index: int = 0
     ) -> Dict[str, Any]:
+
         num_locations = len(location_ids)
         num_vehicles = len(vehicles)
         location_id_to_index = {loc_id: idx for idx, loc_id in enumerate(location_ids)}
@@ -78,7 +79,21 @@ class ORToolsVRPSolver:
             )
             return int(total_demand * 100)
 
-        solution = self.get_solution(demand_callback, routing, vehicles)
+        demand_callback_index = routing.RegisterUnaryTransitCallback(demand_callback)
+        routing.AddDimensionWithVehicleCapacity(
+            demand_callback_index,
+            0,  # no slack
+            [int(v.capacity * 100) for v in vehicles],
+            True,
+            "Capacity"
+        )
+
+        search_parameters = pywrapcp.DefaultRoutingSearchParameters()
+        search_parameters.first_solution_strategy = routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
+        search_parameters.local_search_metaheuristic = routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
+        search_parameters.time_limit.seconds = self.time_limit_seconds
+
+        solution = routing.SolveWithParameters(search_parameters)
 
         if solution:
             routes, assigned_vehicles, total_distance = [], {}, 0
@@ -87,11 +102,12 @@ class ORToolsVRPSolver:
                 while not routing.IsEnd(index):
                     node_idx = manager.IndexToNode(index)
                     route.append(location_ids[node_idx])
-                    previous_index, index = index, solution.Value(routing.NextVar(index))
+                    previous_index = index
+                    index = solution.Value(routing.NextVar(index))
                     total_distance += routing.GetArcCostForVehicle(previous_index, index, vehicle_idx) / 1000
                 node_idx = manager.IndexToNode(index)
                 route.append(location_ids[node_idx])
-                if route:
+                if len(route) > 2:  # skip empty routes that go from depot to depot
                     routes.append(route)
                     assigned_vehicles[vehicles[vehicle_idx].id] = len(routes) - 1
 
@@ -176,7 +192,7 @@ class ORToolsVRPSolver:
         def demand_callback(from_index):
             from_node = manager.IndexToNode(from_index)
             location_id = location_ids[from_node]
-            total_demand = sum(-d.demand if d.is_pickup else d.demand for d in deliveries if d.location_id == location_id)
+            total_demand = sum(d.demand if d.is_pickup else -d.demand for d in deliveries if d.location_id == location_id)
             return int(total_demand * 100)
 
         solution = self.get_solution(demand_callback, routing, vehicles)
