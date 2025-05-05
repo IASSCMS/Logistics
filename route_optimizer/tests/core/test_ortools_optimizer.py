@@ -1,4 +1,6 @@
 import unittest
+from tkinter.constants import DISABLED
+
 import numpy as np
 
 from route_optimizer.core.ortools_optimizer import ORToolsVRPSolver, Vehicle, Delivery
@@ -97,6 +99,21 @@ class TestORToolsVRPSolver(unittest.TestCase):
             self.assertEqual(route[0], "depot")
             self.assertEqual(route[-1], "depot")
 
+    @unittest.skip("Not implemented yet")
+    def test_partial_assignment_due_to_capacity(self):
+        """Test case where only some deliveries can be assigned due to limited capacity."""
+        # Each vehicle can carry 8 units; total demand is 20, which exceeds total capacity (16)
+        deliveries = [
+            Delivery(id="d1", location_id="A", demand=6.0),
+            Delivery(id="d2", location_id="B", demand=6.0),
+            Delivery(id="d3", location_id="C", demand=8.0)
+        ]
+        res = self.solver.solve(self.distance_matrix, self.location_ids, self.vehicles, deliveries, depot_index=0)
+
+        self.assertEqual(res["status"], "success")
+        self.assertGreater(len(res["unassigned_deliveries"]), 0, "Some deliveries should be unassigned")
+        self.assertLess(len(res["unassigned_deliveries"]), 3, "Not all deliveries should be unassigned")
+        self.assertGreater(len(res["routes"]), 0, "At least one route should be assigned")
 
 if __name__ == "__main__":
     unittest.main()
