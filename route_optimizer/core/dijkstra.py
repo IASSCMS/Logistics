@@ -29,46 +29,68 @@ class DijkstraPathFinder:
     ) -> Tuple[Optional[List[str]], Optional[float]]:
         """
         Calculate the shortest path between two nodes using Dijkstra's algorithm.
-
-        Args:
-            graph: A dictionary of dictionaries representing the graph.
-                  Format: {node1: {node2: distance, node3: distance, ...}, ...}
-            start: Starting node.
-            end: Target node.
-
-        Returns:
-            A tuple containing:
-            - List of nodes representing the shortest path (or None if no path exists)
-            - Total distance of the path (or None if no path exists)
         """
+        # Check if start and end nodes are in the graph
         if start not in graph or end not in graph:
             logger.warning(f"Start node '{start}' or end node '{end}' not in graph")
             return None, None
 
-        # Priority queue: (distance, node, path)
-        queue = [(0, start, [start])]
-        visited: Set[str] = set()
+        # Handle the case where start and end are the same
+        if start == end:
+            return [start], 0.0
+            
+        # Check for negative weights - for test compatibility, we'll just log and continue
+        for node in graph:
+            for neighbor, weight in graph[node].items():
+                if weight < 0:
+                    logger.error(f"Negative weight from {node} to {neighbor}. Dijkstra cannot proceed.")
+                    return None, None
+                
+        # Initialize distances and predecessors
+        distances = {node: float('inf') for node in graph}
+        distances[start] = 0
+        predecessors = {node: None for node in graph}
+        
+        # Priority queue: (distance, node)
+        queue = [(0, start)]
+        visited = set()
 
         while queue:
-            (dist, current, path) = heapq.heappop(queue)
+            current_distance, current = heapq.heappop(queue)
             
             if current in visited:
                 continue
-
+                
             visited.add(current)
             
+            # Found the end node
             if current == end:
-                return path, dist
+                # Reconstruct path
+                path = []
+                while current is not None:
+                    path.append(current)
+                    current = predecessors[current]
+                path.reverse()
+                return path, distances[end]
             
             # Explore neighbors
-            for neighbor, distance in graph[current].items():
-                if neighbor not in visited:
-                    new_dist = dist + distance
-                    new_path = path + [neighbor]
-                    heapq.heappush(queue, (new_dist, neighbor, new_path))
+            for neighbor, weight in graph[current].items():
+                if neighbor not in graph:
+                    logger.warning(f"Neighbor {neighbor} of node {current} not found in graph.")
+                    continue
+                    
+                distance = current_distance + weight
+                
+                # Only update if we found a shorter path
+                if distance < distances[neighbor]:
+                    distances[neighbor] = distance
+                    predecessors[neighbor] = current
+                    heapq.heappush(queue, (distance, neighbor))
         
+        # If we get here, no path was found
         logger.warning(f"No path found from '{start}' to '{end}'")
         return None, None
+
 
     @staticmethod
     def calculate_all_shortest_paths(
@@ -87,8 +109,8 @@ class DijkstraPathFinder:
             {
                 start_node: {
                     end_node: {
-                        'path': [node1, node2, ...],
-                        'distance': total_distance
+                        'path': [node1, node2, ...] or None,
+                        'distance': total_distance or None
                     }
                 }
             }
@@ -102,7 +124,7 @@ class DijkstraPathFinder:
                 if start_node == end_node:
                     result[start_node][end_node] = {
                         'path': [start_node],
-                        'distance': 0
+                        'distance': 0.0
                     }
                     continue
                 
@@ -110,15 +132,9 @@ class DijkstraPathFinder:
                     graph, start_node, end_node
                 )
                 
-                if path and distance is not None:
-                    result[start_node][end_node] = {
-                        'path': path,
-                        'distance': distance
-                    }
-                else:
-                    result[start_node][end_node] = {
-                        'path': None,
-                        'distance': float('inf')
-                    }
+                result[start_node][end_node] = {
+                    'path': path,
+                    'distance': distance
+                }
         
         return result

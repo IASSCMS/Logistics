@@ -113,10 +113,11 @@ class OptimizationService:
         """
         detailed_routes = []
         
-        for route in result['routes']:
+        for route in result.get('routes', []):
             detailed_route = {
                 'stops': route,
-                'segments': []
+                'segments': [],
+                'total_distance': 0.0
             }
             
             # Process each segment in the route
@@ -129,18 +130,23 @@ class OptimizationService:
                     graph, from_location, to_location
                 )
                 
-                if path:
-                    detailed_route['segments'].append({
+                # Only add segment if path was found
+                if path and distance is not None:
+                    segment = {
                         'from': from_location,
                         'to': to_location,
                         'path': path,
                         'distance': distance
-                    })
+                    }
+                    detailed_route['segments'].append(segment)
+                    detailed_route['total_distance'] += distance
+                else:
+                    logger.warning(f"No path found between {from_location} and {to_location}")
             
             detailed_routes.append(detailed_route)
         
         result['detailed_routes'] = detailed_routes
-    
+
     def _add_summary_statistics(self, result: Dict[str, Any], vehicles: List[Vehicle]) -> None:
         """
         Add summary statistics to the optimization result.
@@ -149,38 +155,51 @@ class OptimizationService:
             result: Optimization result dictionary to update.
             vehicles: List of Vehicle objects.
         """
-        # Calculate cost per vehicle
+        # Initialize statistics
         vehicle_costs = {}
-        total_cost = 0
+        total_cost = 0.0
+        total_distance = 0.0
         
-        for vehicle_id, route_idx in result['assigned_vehicles'].items():
-            # Find corresponding vehicle object
-            vehicle = next((v for v in vehicles if v.id == vehicle_id), None)
-            
-            if vehicle:
-                # Get route distance
-                route_distance = 0
-                for segment in result['detailed_routes'][route_idx]['segments']:
-                    route_distance += segment['distance']
+        # Get detailed routes
+        detailed_routes = result.get('detailed_routes', [])
+        assigned_vehicles = result.get('assigned_vehicles', {})
+        
+        # Calculate per-vehicle statistics
+        for vehicle_id, route_idx in assigned_vehicles.items():
+            if route_idx >= len(detailed_routes):
+                logger.warning(f"Invalid route index {route_idx} for vehicle {vehicle_id}")
+                continue
                 
-                # Calculate cost
-                cost = vehicle.fixed_cost + (route_distance * vehicle.cost_per_km)
-                vehicle_costs[vehicle_id] = {
-                    'distance': route_distance,
-                    'cost': cost
-                }
-                total_cost += cost
+            vehicle = next((v for v in vehicles if v.id == vehicle_id), None)
+            if not vehicle:
+                logger.warning(f"Vehicle {vehicle_id} not found in vehicles list")
+                continue
+                
+            route = detailed_routes[route_idx]
+            route_distance = route.get('total_distance', 0.0)
+            total_distance += route_distance
+            
+            # Calculate cost
+            cost = vehicle.fixed_cost + (route_distance * vehicle.cost_per_km)
+            vehicle_costs[vehicle_id] = {
+                'distance': route_distance,
+                'cost': cost,
+                'num_stops': len(route.get('stops', [])) - 2  # Exclude depot at start/end
+            }
+            total_cost += cost
         
+        # Add statistics to result
         result['vehicle_costs'] = vehicle_costs
         result['total_cost'] = total_cost
+        result['total_distance'] = total_distance
         
-        # Calculate other statistics: total distance, avg distance per stop, etc.
-        total_stops = sum(len(route['stops']) for route in result['detailed_routes'])
+        # Calculate stop statistics
+        total_stops = sum(cost_data['num_stops'] for cost_data in vehicle_costs.values())
         result['total_stops'] = total_stops
         
         if total_stops > 0:
-            result['avg_distance_per_stop'] = result['total_distance'] / total_stops
+            result['avg_distance_per_stop'] = total_distance / total_stops
         
-        # Count used/unused vehicles
-        result['vehicles_used'] = len(result['assigned_vehicles'])
+        # Vehicle utilization statistics
+        result['vehicles_used'] = len(assigned_vehicles)
         result['vehicles_unused'] = len(vehicles) - result['vehicles_used']

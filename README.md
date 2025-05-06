@@ -166,7 +166,6 @@ Logistics
    │  ├─ test_optimization_service.py
    │  ├─ test_ortools_optimizer.py
    │  └─ __init__.py
-   ├─ tests.py
    ├─ utils
    │  ├─ helpers.py
    │  └─ __init__.py
