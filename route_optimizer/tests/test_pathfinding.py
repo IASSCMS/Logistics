@@ -29,7 +29,7 @@ class TestDijkstraPathFinder(unittest.TestCase):
     def test_edge_cases(self):
         """Test edge cases for the shortest path algorithm."""
         # Test path from a node to itself
-        path, cost = self.path_finder.calculate_shortest_path(self.graph, 'A', 'A')
+        path, cost = self.pathfinder.calculate_shortest_path(self.graph, 'A', 'A')
         self.assertEqual(path, ['A'])
         self.assertEqual(cost, 0.0)
         
@@ -50,7 +50,7 @@ class TestDijkstraPathFinder(unittest.TestCase):
     def test_all_shortest_paths(self):
         """Test calculating all shortest paths between nodes."""
         # Assume all_shortest_paths returns a dict {target: (path, cost)}
-        all_paths = self.pathfinder.all_shortest_paths(self.graph, 'A')
+        all_paths = self.pathfinder.calculate_all_shortest_paths(self.graph, 'A')
         expected = {
             'A': (['A'], 0),
             'B': (['A', 'B'], 1),
@@ -75,6 +75,7 @@ class TestBellmanFordPathFinder(unittest.TestCase):
             'C': {'D': 3},
             'D': {},
         }
+        self.nodes = ['A', 'B', 'C', 'D']
         self.pathfinder = BellmanFordPathFinder()
 
     def test_shortest_path(self):
@@ -83,7 +84,7 @@ class TestBellmanFordPathFinder(unittest.TestCase):
         self.assertEqual(cost, 5)
 
     def test_negative_weight_handling(self):
-        path, cost = self.pathfinder.find_shortest_path(self.graph, 'A', 'C')
+        path, cost = self.pathfinder.calculate_shortest_path(self.graph, 'A', 'C')
         self.assertEqual(path, ['A', 'B', 'C'])
         self.assertEqual(cost, 2)
 
