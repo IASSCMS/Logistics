@@ -5,6 +5,7 @@ This module contains tests for the ORToolsVRPSolver class.
 """
 import unittest
 import numpy as np
+from route_optimizer.core.constants import TIME_SCALING_FACTOR
 from route_optimizer.core.ortools_optimizer import ORToolsVRPSolver
 from route_optimizer.core.types_1 import Location, OptimizationResult
 from route_optimizer.models import Vehicle, Delivery
@@ -198,7 +199,7 @@ class TestORToolsVRPSolver(unittest.TestCase):
             for route in solution['routes']:
                 for stop in route:
                     loc_id = stop['location_id']
-                    arrival_minutes = stop['arrival_time_seconds'] // 60
+                    arrival_minutes = stop['arrival_time_seconds'] // TIME_SCALING_FACTOR  # Convert seconds to minutes
                     location = next((l for l in locations_with_tw if l.id == loc_id), None)
 
                     if location and location.time_window_start is not None and location.time_window_end is not None:

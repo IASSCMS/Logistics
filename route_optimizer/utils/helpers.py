@@ -10,6 +10,8 @@ import datetime
 import json
 from math import radians, cos, sin, asin, sqrt
 
+from route_optimizer.core.constants import MAX_SAFE_DISTANCE, TIME_SCALING_FACTOR
+
 # Set up logging
 logger = logging.getLogger(__name__)
 
@@ -127,7 +129,6 @@ def calculate_route_statistics(
         statistics["average_capacity_utilization"] = sum(capacity_utils) / len(capacity_utils)
     
     return statistics
-
 
 def create_distance_time_matrices(
     locations: List[Any],
@@ -263,8 +264,8 @@ def format_duration(seconds: float) -> str:
     Returns:
         Human-readable duration string.
     """
-    hours, remainder = divmod(seconds, 3600)
-    minutes, seconds = divmod(remainder, 60)
+    hours, remainder = divmod(seconds, 60 * TIME_SCALING_FACTOR)
+    minutes, seconds = divmod(remainder, TIME_SCALING_FACTOR)
     
     parts = []
     if hours > 0:

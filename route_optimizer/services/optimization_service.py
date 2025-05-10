@@ -156,6 +156,90 @@ class OptimizationService:
         
         return result
 
+    def _validate_inputs(self, locations, vehicles, deliveries):
+        """
+        Validate input data before optimization.    Args:
+            locations: List of Location objects
+            vehicles: List of Vehicle objects
+            deliveries: List of Delivery objects    Raises:
+            ValueError: If input data is invalid
+        """
+        # Check for empty inputs
+        if not locations:
+            raise ValueError("No locations provided")
+        if not vehicles:
+            raise ValueError("No vehicles provided")
+        if not deliveries:
+            raise ValueError("No deliveries provided")    # Check for valid coordinates
+
+        for loc in locations:
+            if not hasattr(loc, 'latitude') or not hasattr(loc, 'longitude'):
+                raise ValueError(f"Location {loc.id} missing latitude or longitude")
+            if loc.latitude < -90 or loc.latitude > 90:
+                raise ValueError(f"Location {loc.id} has invalid latitude: {loc.latitude}")
+            if loc.longitude < -180 or loc.longitude > 180:
+                raise ValueError(f"Location {loc.id} has invalid longitude: {loc.longitude}")    # Check vehicle capacities
+        # Add this to your validation function
+        for loc in locations:
+            if hasattr(loc, 'time_window_start') and hasattr(loc, 'time_window_end'):
+                if loc.time_window_start is not None and loc.time_window_end is not None:
+                    if loc.time_window_start > loc.time_window_end:
+                        raise ValueError(f"Location {loc.id} has invalid time window: {loc.time_window_start} > {loc.time_window_end}")
+
+        for vehicle in vehicles:
+            if vehicle.capacity <= 0:
+                raise ValueError(f"Vehicle {vehicle.id} has invalid capacity: {vehicle.capacity}")    # Check delivery demands
+        # Add this to your validation function
+        location_ids = {loc.id for loc in locations}
+        for vehicle in vehicles:
+            if vehicle.start_location_id not in location_ids:
+                raise ValueError(f"Vehicle {vehicle.id} has invalid start location: {vehicle.start_location_id}")
+            if vehicle.end_location_id and vehicle.end_location_id not in location_ids:
+                raise ValueError(f"Vehicle {vehicle.id} has invalid end location: {vehicle.end_location_id}")
+
+        for delivery in deliveries:
+            if delivery.demand < 0:
+                raise ValueError(f"Delivery {delivery.id} has negative demand: {delivery.demand}")
+        # Add this to your validation function
+        for delivery in deliveries:
+            if delivery.location_id not in location_ids:
+                raise ValueError(f"Delivery {delivery.id} has invalid location: {delivery.location_id}")
+
+    def _convert_to_optimization_result(self, result_dict):
+        """
+        Convert a result dictionary to an OptimizationResult object.
+        
+        Args:
+            result_dict: Dictionary with optimization results
+            
+        Returns:
+            OptimizationResult object
+        """
+        try:
+            return OptimizationResult(
+                status=result_dict.get('status', 'unknown'),
+                routes=result_dict.get('routes', []),
+                total_distance=result_dict.get('total_distance', 0.0),
+                total_cost=result_dict.get('total_cost', 0.0),
+                assigned_vehicles=result_dict.get('assigned_vehicles', {}),
+                unassigned_deliveries=result_dict.get('unassigned_deliveries', []),
+                detailed_routes=result_dict.get('detailed_routes', []),
+                statistics=result_dict.get('statistics', {})
+            )
+        except Exception as e:
+            logger.warning(f"Failed to convert dict to OptimizationResult: {e}")
+            # Return a basic result
+            return OptimizationResult(
+                status='error',
+                routes=[],
+                total_distance=0.0,
+                total_cost=0.0,
+                assigned_vehicles={},
+                unassigned_deliveries=[],
+                detailed_routes=[],
+                statistics={'error': f"Conversion error: {str(e)}"}
+            )
+        
     def optimize_routes(
         self,
         locations: List[Location],
@@ -192,21 +276,31 @@ class OptimizationService:
                 - statistics: Dictionary of statistics about the optimization
         """
         try:
+            # Validate inputs first
+            logger.info(f"Validating inputs: {len(locations)} locations, {len(vehicles)} vehicles, {len(deliveries)} deliveries")
+            self._validate_inputs(locations, vehicles, deliveries)
+            
             # Use provided API flag or default
             use_api_flag = use_api if use_api is not None else USE_API_BY_DEFAULT
             api_key_to_use = api_key or GOOGLE_MAPS_API_KEY
             
+            logger.info(f"Creating distance matrix (use_api={use_api_flag})")
             # Create distance matrix
             distance_matrix, location_ids = DistanceMatrixBuilder.create_distance_matrix(
                 locations, use_api=use_api_flag, api_key=api_key_to_use
             )
             
+            # Sanitize distance matrix before processing
+            logger.debug("Sanitizing distance matrix")
+            distance_matrix = self._sanitize_distance_matrix(distance_matrix)
+
             # Apply traffic factors if requested
             if consider_traffic and traffic_data:
-                # Apply traffic data to distance matrix
-                for (from_idx, to_idx), factor in traffic_data.items():
-                    if 0 <= from_idx < len(distance_matrix) and 0 <= to_idx < len(distance_matrix[0]):
-                        distance_matrix[from_idx][to_idx] *= factor
+                logger.info(f"Applying traffic factors to {len(traffic_data)} routes")
+                # Apply traffic safely with bounds checking
+                distance_matrix = self._apply_traffic_safely(distance_matrix, traffic_data)
+                # Sanitize again after applying traffic
+                distance_matrix = self._sanitize_distance_matrix(distance_matrix)
             
             # Find depot index
             depot_index = 0
@@ -216,18 +310,84 @@ class OptimizationService:
                 if depot:
                     try:
                         depot_index = location_ids.index(depot.id)
+                        logger.info(f"Using depot at index {depot_index} (ID: {depot.id})")
                     except ValueError:
                         # If depot not in locations, use first location
+                        logger.warning(f"Depot ID {depot.id} not found in location_ids, using first location as depot")
                         depot_index = 0
             
             # Solve the VRP
             solver = ORToolsVRPSolver()
-            result = solver.solve(
-                distance_matrix=distance_matrix,
-                location_ids=location_ids,
-                vehicles=vehicles,
-                deliveries=deliveries,
-                depot_index=depot_index
+            
+            # Solve with appropriate method based on time windows
+            if consider_time_windows:
+                logger.info("Solving VRP with time windows")
+                result = solver.solve_with_time_windows(
+                    distance_matrix=distance_matrix,
+                    location_ids=location_ids,
+                    vehicles=vehicles,
+                    deliveries=deliveries,
+                    locations=locations,
+                    depot_index=depot_index
+                )
+            else:
+                logger.info("Solving VRP without time windows")
+                result = solver.solve(
+                    distance_matrix=distance_matrix,
+                    location_ids=location_ids,
+                    vehicles=vehicles,
+                    deliveries=deliveries,
+                    depot_index=depot_index
+                )
+            
+            # Ensure result is a proper OptimizationResult object
+            if not isinstance(result, OptimizationResult):
+                logger.info("Converting result to OptimizationResult")
+                result = self._convert_to_optimization_result(result)
+            
+            # Add detailed paths
+            if result.status == 'success':
+                if use_api_flag:
+                    # Use Google Maps for detailed paths
+                    logger.info("Adding detailed paths using Google Maps API")
+                    try:
+                        graph = TrafficService(api_key=api_key_to_use).create_road_graph(locations)
+                        self._add_detailed_paths(result, graph, location_ids)
+                    except Exception as e:
+                        logger.error(f"Error adding detailed paths with Google Maps: {str(e)}")
+                        # Fallback to simple paths
+                        logger.info("Falling back to simple path calculation")
+                        graph = {
+                            'matrix': distance_matrix,
+                            'location_ids': location_ids
+                        }
+                        PathAnnotator(self.path_finder).annotate(result, graph)
+                else:
+                    # Use PathAnnotator with distance matrix
+                    logger.info("Adding detailed paths using distance matrix")
+                    graph = {
+                        'matrix': distance_matrix,
+                        'location_ids': location_ids
+                    }
+                    PathAnnotator(self.path_finder).annotate(result, graph)
+                
+                # Add statistics
+                logger.info("Adding route statistics")
+                self._add_summary_statistics(result, vehicles)
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error optimizing routes: {str(e)}", exc_info=True)
+            return OptimizationResult(
+                status='error',
+                routes=[],
+                total_distance=0.0,
+                total_cost=0.0,
+                assigned_vehicles={},
+                unassigned_deliveries=[delivery.id for delivery in deliveries],
+                detailed_routes=[],
+                statistics={'error': str(e)}
             )
             
             # # Ensure result is properly structured
@@ -259,35 +419,6 @@ class OptimizationService:
             #     result['statistics'] = {}
             #     self.route_stats_service.add_statistics(result, vehicles)
             
-            # Add detailed paths
-            if use_api_flag:
-                # Use Google Maps for detailed paths
-                graph = TrafficService(api_key=api_key_to_use).create_road_graph(locations)
-                self.add_detailed_paths(result, graph, location_ids)
-            else:
-                # Use PathAnnotator with distance matrix
-                graph = {
-                    'matrix': distance_matrix,
-                    'location_ids': location_ids
-                }
-                # PathAnnotator().annotate(result, graph)
-                PathAnnotator(self.path_finder).annotate(result, graph)
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"Error in route optimization: {str(e)}", exc_info=True)
-            # Return an error result as OptimizationResult
-            return OptimizationResult(
-                status='error',
-                routes=[],
-                total_distance=0.0,
-                total_cost=0.0,
-                assigned_vehicles={},
-                unassigned_deliveries=[delivery.id for delivery in deliveries],
-                detailed_routes=[],
-                statistics={'error': str(e)}
-            )
 
 # class OptimizationService:
     # def __init__(self, time_limit_seconds=30):

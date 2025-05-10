@@ -14,6 +14,7 @@ import requests
 from datetime import datetime, timedelta
 from urllib.parse import quote
 
+from route_optimizer.core.constants import DISTANCE_SCALING_FACTOR, MAX_SAFE_DISTANCE
 from route_optimizer.core.types_1 import Location
 from route_optimizer.models import DistanceMatrixCache
 
@@ -204,6 +205,109 @@ class DistanceMatrixBuilder:
         return json.loads(response.text)
 
     @staticmethod
+    def _process_api_response(response: Dict[str, Any]) -> Tuple[List[List[float]], List[List[float]]]:
+        """
+        Process the Google Maps Distance Matrix API response into distance and time matrices.
+        
+        Args:
+            response: The response from the Google Maps API
+            
+        Returns:
+            Tuple containing (distance_matrix, time_matrix)
+            Both matrices are in meters and seconds respectively
+        """
+        distance_matrix = []
+        time_matrix = []
+        
+        for row in response.get('rows', []):
+            dist_row = []
+            time_row = []
+            
+            for element in row.get('elements', []):
+                # Check if the element has the expected structure
+                if element.get('status') == 'OK':
+                    dist_row.append(element.get('distance', {}).get('value', 0) / 1000)  # Convert to km
+                    time_row.append(element.get('duration', {}).get('value', 0))  # seconds
+                else:
+                    # For unreachable destinations, use a large value
+                    logger.warning(f"Destination unreachable: {element.get('status')}")
+                    dist_row.append(float('inf'))
+                    time_row.append(float('inf'))
+            
+            distance_matrix.append(dist_row)
+            time_matrix.append(time_row)
+        
+        return distance_matrix, time_matrix
+
+    def _sanitize_distance_matrix(self, matrix):
+        """
+        Sanitize distance matrix by replacing infinite or extreme values.
+        
+        Args:
+            matrix: Distance matrix to sanitize
+            
+        Returns:
+            Sanitized matrix
+        """
+        if matrix is None:
+            return np.zeros((1, 1))
+        
+        # Make a copy to avoid modifying the original
+        sanitized = np.array(matrix, dtype=float)
+        
+        # Define the maximum safe distance value
+        max_safe_value = MAX_SAFE_DISTANCE  # This should be defined in your constants
+        
+        # Replace any NaN values with a large but valid distance
+        sanitized = np.nan_to_num(sanitized, nan=max_safe_value)
+        
+        # Replace any infinite values with a large but valid distance
+        sanitized[np.isinf(sanitized)] = max_safe_value
+        
+        # Cap any excessively large values
+        sanitized[sanitized > max_safe_value] = max_safe_value
+        
+        # Ensure all values are non-negative
+        sanitized[sanitized < 0] = 0
+        
+        return sanitized
+
+    def _apply_traffic_safely(self, distance_matrix, traffic_data):
+        """
+        Apply traffic factors to distance matrix with bounds checking.
+        
+        Args:
+            distance_matrix: Original distance matrix
+            traffic_data: Dictionary mapping (from_idx, to_idx) to traffic factors
+            
+        Returns:
+            Updated distance matrix
+        """
+        # Make a copy to avoid modifying the original
+        matrix_with_traffic = np.array(distance_matrix, dtype=float)
+        
+        # Get matrix dimensions
+        rows, cols = matrix_with_traffic.shape
+        
+        # Define maximum safe factor to prevent overflow
+        max_safe_factor = 5.0  # Adjust this value based on your use case
+        
+        for (from_idx, to_idx), factor in traffic_data.items():
+            # Validate indices
+            if 0 <= from_idx < rows and 0 <= to_idx < cols:
+                # Validate factor (ensure it's within reasonable bounds)
+                safe_factor = min(max(float(factor), 1.0), max_safe_factor)
+                
+                # Apply the factor
+                matrix_with_traffic[from_idx, to_idx] *= safe_factor
+                
+                # Log if factor was capped
+                if safe_factor != factor:
+                    logger.warning(f"Traffic factor capped from {factor} to {safe_factor} for route ({from_idx},{to_idx})")
+        
+        return matrix_with_traffic
+
+    @staticmethod
     def _build_distance_matrix(response):
         """Builds distance matrix from API response."""
         distance_matrix = []
@@ -267,7 +371,7 @@ class DistanceMatrixBuilder:
             for i in range(num_locations):
                 for j in range(num_locations):
                     # API returns distances in meters, convert to kilometers
-                    distance_matrix[i, j] = api_matrix[i][j] / 1000.0
+                    distance_matrix[i, j] = api_matrix[i][j] / DISTANCE_SCALING_FACTOR
             
             # Cache the result
             if use_cache:
@@ -319,15 +423,15 @@ class DistanceMatrixBuilder:
         for i in range(q):
             origin_addresses = addresses[i * max_rows: (i + 1) * max_rows]
             response = DistanceMatrixBuilder._send_request_with_retry(origin_addresses, dest_addresses, api_key)
-            distance_rows, time_rows = DistanceMatrixBuilder._build_distance_and_time_matrices(response)
+            distance_rows, time_rows = DistanceMatrixBuilder._process_api_response(response)
             distance_matrix.extend(distance_rows)
             time_matrix.extend(time_rows)
 
-        # Get the remaining r rows, if necessary
+        # And also in the r > 0 block
         if r > 0:
             origin_addresses = addresses[q * max_rows: q * max_rows + r]
             response = DistanceMatrixBuilder._send_request_with_retry(origin_addresses, dest_addresses, api_key)
-            distance_rows, time_rows = DistanceMatrixBuilder._build_distance_and_time_matrices(response)
+            distance_rows, time_rows = DistanceMatrixBuilder._process_api_response(response)
             distance_matrix.extend(distance_rows)
             time_matrix.extend(time_rows)
         

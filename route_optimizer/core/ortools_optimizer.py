@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from ortools.constraint_solver import routing_enums_pb2
 from ortools.constraint_solver import pywrapcp
 
+from route_optimizer.core.constants import CAPACITY_SCALING_FACTOR, DISTANCE_SCALING_FACTOR, MAX_SAFE_DISTANCE, MAX_SAFE_TIME, TIME_SCALING_FACTOR
 from route_optimizer.core.types_1 import Location, OptimizationResult, validate_optimization_result
 from route_optimizer.models import Vehicle, Delivery
 
@@ -134,19 +135,29 @@ class ORToolsVRPSolver:
         
         # Create and register a transit callback
         def distance_callback(from_index, to_index):
-            """Returns the distance between the two nodes."""
+            """Returns the scaled distance between the two nodes."""
             try:
                 # Convert from routing variable Index to distance matrix NodeIndex
                 from_node = manager.IndexToNode(from_index)
                 to_node = manager.IndexToNode(to_index)
                 
-                # Scale value to keep within int64 range
-                # Using a smaller scale factor (100 instead of 1000) to avoid overflow
-                return int(distance_matrix[from_node][to_node] * 100)
-            except OverflowError:
-                logger.warning(f"OverflowError in distance callback for indices: {from_index}, {to_index}")
+                # Get the raw distance value
+                raw_distance = distance_matrix[from_node][to_node]
+                
+                # Check if it's a valid number and not too large
+                if np.isinf(raw_distance) or np.isnan(raw_distance):
+                    logger.warning(f"Invalid distance value {raw_distance} from node {from_node} to {to_node}")
+                    return int(MAX_SAFE_DISTANCE * DISTANCE_SCALING_FACTOR)
+                    
+                # Apply scaling with bounds checking
+                safe_distance = min(raw_distance, MAX_SAFE_DISTANCE)
+                scaled_distance = int(safe_distance * DISTANCE_SCALING_FACTOR)
+                
+                return scaled_distance
+            except Exception as e:
+                logger.error(f"Error in distance callback for indices: {from_index}, {to_index}: {str(e)}")
                 # Return a large but valid distance as fallback
-                return 2147483647  # Maximum positive 32-bit integer
+                return int(MAX_SAFE_DISTANCE * DISTANCE_SCALING_FACTOR)
         
         transit_callback_index = routing.RegisterTransitCallback(distance_callback)
         
@@ -155,21 +166,34 @@ class ORToolsVRPSolver:
         
         # Add Capacity constraint
         def demand_callback(from_index):
-            """Returns the demand for the node."""
-            from_node = manager.IndexToNode(from_index)
-            location_id = location_ids[from_node]
-            # Find if there's a delivery at this location
-            for delivery in deliveries:
-                if delivery.location_id == location_id:
-                    return delivery.size
-            return 0
+            """Returns the scaled demand for the node."""
+            try:
+                from_node = manager.IndexToNode(from_index)
+                location_id = location_ids[from_node]
+                
+                # Find all deliveries at this location
+                total_demand = 0
+                for delivery in deliveries:
+                    if delivery.location_id == location_id:
+                        # Handle both size and demand attributes for compatibility
+                        demand_value = delivery.demand if hasattr(delivery, 'demand') else delivery.size
+                        # Add pickups as negative demand, deliveries as positive
+                        if hasattr(delivery, 'is_pickup') and delivery.is_pickup:
+                            demand_value = -demand_value
+                        total_demand += demand_value
+                
+                # Apply scaling
+                return int(total_demand * CAPACITY_SCALING_FACTOR)
+            except Exception as e:
+                logger.error(f"Error in demand callback for index {from_index}: {str(e)}")
+                return 0
         
         demand_callback_index = routing.RegisterUnaryTransitCallback(demand_callback)
         
         routing.AddDimensionWithVehicleCapacity(
             demand_callback_index,
             0,
-            [int(v.capacity * 100) for v in vehicles],  # Make sure the capacity is converted to integer
+            [int(v.capacity * CAPACITY_SCALING_FACTOR) for v in vehicles],  # Make sure the capacity is converted to integer
             True,
             'Capacity'
         )
@@ -205,7 +229,7 @@ class ORToolsVRPSolver:
                     index = solution.Value(routing.NextVar(index))
                     total_distance += routing.GetArcCostForVehicle(
                         previous_index, index, vehicle_idx
-                    ) / 1000  # Convert back from int
+                    ) / DISTANCE_SCALING_FACTOR
                 
                 # Add the end location
                 node_idx = manager.IndexToNode(index)
@@ -314,32 +338,63 @@ class ORToolsVRPSolver:
 
         # Distance callback
         def distance_callback(from_index, to_index):
-            """Returns the distance between the two nodes."""
+            """Returns the scaled distance between the two nodes."""
             try:
                 # Convert from routing variable Index to distance matrix NodeIndex
                 from_node = manager.IndexToNode(from_index)
                 to_node = manager.IndexToNode(to_index)
                 
-                # Scale value to keep within int64 range
-                # Using a smaller scale factor (100 instead of 1000) to avoid overflow
-                return int(distance_matrix[from_node][to_node] * 100)
-            except OverflowError:
-                logger.warning(f"OverflowError in distance callback for indices: {from_index}, {to_index}")
+                # Get the raw distance value
+                raw_distance = distance_matrix[from_node][to_node]
+                
+                # Check if it's a valid number and not too large
+                if np.isinf(raw_distance) or np.isnan(raw_distance):
+                    logger.warning(f"Invalid distance value {raw_distance} from node {from_node} to {to_node}")
+                    return int(MAX_SAFE_DISTANCE * DISTANCE_SCALING_FACTOR)
+                    
+                # Apply scaling with bounds checking
+                safe_distance = min(raw_distance, MAX_SAFE_DISTANCE)
+                scaled_distance = int(safe_distance * DISTANCE_SCALING_FACTOR)
+                
+                return scaled_distance
+            except Exception as e:
+                logger.error(f"Error in distance callback for indices: {from_index}, {to_index}: {str(e)}")
                 # Return a large but valid distance as fallback
-                return 2147483647  # Maximum positive 32-bit integer
+                return int(MAX_SAFE_DISTANCE * DISTANCE_SCALING_FACTOR)
 
         transit_callback_index = routing.RegisterTransitCallback(distance_callback)
         routing.SetArcCostEvaluatorOfAllVehicles(transit_callback_index)
 
         # Time callback
         def time_callback(from_index, to_index):
-            from_node = manager.IndexToNode(from_index)
-            to_node = manager.IndexToNode(to_index)
-            distance_km = distance_matrix[from_node][to_node]
-            travel_minutes = (distance_km / speed_km_per_hour) * 60
-            to_loc = location_index_to_location.get(to_node)
-            service_time = to_loc.service_time if to_loc else 0
-            return int((travel_minutes + service_time) * 60)  # seconds
+            """Returns the travel time between the two nodes."""
+            try:
+                from_node = manager.IndexToNode(from_index)
+                to_node = manager.IndexToNode(to_index)
+                
+                # Get the raw distance value
+                distance_km = distance_matrix[from_node][to_node]
+                
+                # Check for valid distance
+                if np.isinf(distance_km) or np.isnan(distance_km):
+                    distance_km = MAX_SAFE_DISTANCE
+                
+                # Calculate travel time in minutes
+                travel_minutes = (min(distance_km, MAX_SAFE_DISTANCE) / speed_km_per_hour) * 60
+                
+                # Add service time for the destination location
+                to_loc = location_index_to_location.get(to_node)
+                service_time = to_loc.service_time if to_loc else 0
+                
+                # Total time in seconds
+                total_time_seconds = (travel_minutes + service_time) * TIME_SCALING_FACTOR
+                
+                # Return scaled time
+                logger.debug(f"Travel time from {from_node} to {to_node}: {travel_minutes} min, service time: {service_time} min")
+                return int(total_time_seconds)
+            except Exception as e:
+                logger.error(f"Error in time callback: {str(e)}")
+                return int(MAX_SAFE_TIME * TIME_SCALING_FACTOR)
 
         time_callback_index = routing.RegisterTransitCallback(time_callback)
 
@@ -357,26 +412,40 @@ class ORToolsVRPSolver:
         for idx, location_id in enumerate(location_ids):
             loc = location_index_to_location.get(idx)
             if loc and loc.time_window_start is not None and loc.time_window_end is not None:
-                start = loc.time_window_start * 60
-                end = loc.time_window_end * 60
+                start = loc.time_window_start * TIME_SCALING_FACTOR
+                end = loc.time_window_end * TIME_SCALING_FACTOR
                 index = manager.NodeToIndex(idx)
                 time_dimension.CumulVar(index).SetRange(start, end)
 
         # Add capacity constraints
         def demand_callback(from_index):
-            from_node = manager.IndexToNode(from_index)
-            location_id = location_ids[from_node]
-            total_demand = 0
-            for d in deliveries:
-                if d.location_id == location_id:
-                    total_demand += -d.demand if d.is_pickup else d.demand
-            return int(total_demand * 100)
+            """Returns the scaled demand for the node."""
+            try:
+                from_node = manager.IndexToNode(from_index)
+                location_id = location_ids[from_node]
+                
+                # Find all deliveries at this location
+                total_demand = 0
+                for delivery in deliveries:
+                    if delivery.location_id == location_id:
+                        # Add pickups as negative demand, deliveries as positive
+                        demand_value = -delivery.demand if delivery.is_pickup else delivery.demand
+                        total_demand += demand_value
+                
+                # Apply scaling with bounds checking
+                logger.debug(f"Raw demand at node {from_node}: {total_demand}")
+                scaled_demand = int(total_demand * CAPACITY_SCALING_FACTOR)
+                logger.debug(f"Scaled demand: {scaled_demand}")
+                return scaled_demand
+            except Exception as e:
+                logger.error(f"Error in demand callback for index {from_index}: {str(e)}")
+                return 0
 
         demand_callback_index = routing.RegisterUnaryTransitCallback(demand_callback)
         routing.AddDimensionWithVehicleCapacity(
             demand_callback_index,
             0,
-            [int(v.capacity * 100) for v in vehicles],
+            [int(v.capacity * CAPACITY_SCALING_FACTOR) for v in vehicles],
             True,
             'Capacity'
         )
@@ -409,7 +478,7 @@ class ORToolsVRPSolver:
                     delivery_locations.add(location_ids[node_index])
                     prev_index = index
                     index = solution.Value(routing.NextVar(index))
-                    total_distance += routing.GetArcCostForVehicle(prev_index, index, vehicle_idx) / 1000
+                    total_distance += routing.GetArcCostForVehicle(prev_index, index, vehicle_idx) / DISTANCE_SCALING_FACTOR
                 node_index = manager.IndexToNode(index)
                 time_val = solution.Min(time_dimension.CumulVar(index))
                 route.append({
