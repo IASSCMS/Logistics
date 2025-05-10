@@ -9,8 +9,9 @@ from typing import Dict, List, Tuple, Optional, Any, Set
 import copy
 import numpy as np
 
-from route_optimizer.core.distance_matrix import Location, DistanceMatrixBuilder
-from route_optimizer.core.ortools_optimizer import Vehicle, Delivery
+from route_optimizer.core.distance_matrix import DistanceMatrixBuilder
+from route_optimizer.core.types_1 import Location, OptimizationResult, ReroutingInfo, validate_optimization_result
+from route_optimizer.models import Vehicle, Delivery
 from route_optimizer.services.optimization_service import OptimizationService
 
 # Set up logging
@@ -39,20 +40,21 @@ class ReroutingService:
         vehicles: List[Vehicle],
         completed_deliveries: List[str],
         traffic_data: Dict[Tuple[int, int], float]
-    ) -> Dict[str, Any]:
+    ) -> OptimizationResult:
         """
-        Reroute vehicles based on updated traffic data.
-        
+        Reroute vehicles based on traffic conditions.
+
         Args:
-            current_routes: Current route plan.
-            locations: List of all locations.
-            vehicles: List of all vehicles.
-            completed_deliveries: IDs of deliveries that have been completed.
-            traffic_data: Dictionary mapping (location_idx, location_idx) to traffic factors.
-                         A factor > 1.0 means slower traffic.
-        
+            current_routes: Current OptimizationResult with route plans.
+            locations: List of Location objects.
+            vehicles: List of Vehicle objects.
+            completed_deliveries: List of delivery IDs that have been completed.
+            traffic_data: Dictionary mapping (from_id, to_id) pairs to traffic factors.
+                        A factor > 1.0 means slower traffic.
+
         Returns:
-            Updated route plan.
+            OptimizationResult with updated routes accounting for traffic conditions.
+            The statistics field will contain rerouting_info with details about the rerouting.
         """
         # Filter out completed deliveries
         remaining_deliveries = self._get_remaining_deliveries(
@@ -73,13 +75,34 @@ class ReroutingService:
             traffic_data=traffic_data
         )
         
-        # Add rerouting metadata
-        new_routes['rerouting_info'] = {
-            'reason': 'traffic',
-            'traffic_factors': len(traffic_data),
-            'completed_deliveries': len(completed_deliveries),
-            'remaining_deliveries': len(remaining_deliveries)
-        }
+        # Handle both OptimizationResult and dict cases
+        if isinstance(new_routes, OptimizationResult):
+            # Create ReroutingInfo DTO
+            rerouting_info = ReroutingInfo(
+                reason='traffic',
+                traffic_factors=len(traffic_data),
+                completed_deliveries=len(completed_deliveries),
+                remaining_deliveries=len(remaining_deliveries)
+            )
+            # Add to statistics
+            if not new_routes.statistics:
+                new_routes.statistics = {}
+            new_routes.statistics['rerouting_info'] = vars(rerouting_info)
+        else:
+            # Add rerouting metadata for dict case
+            new_routes['rerouting_info'] = {
+                'reason': 'traffic',
+                'traffic_factors': len(traffic_data),
+                'completed_deliveries': len(completed_deliveries),
+                'remaining_deliveries': len(remaining_deliveries)
+            }
+        
+        # # Validate result before returning
+        # if isinstance(new_routes, dict):
+        #     try:
+        #         validate_optimization_result(new_routes)
+        #     except ValueError as e:
+        #         logger.warning(f"Rerouting result validation warning: {e}")
         
         return new_routes
     
@@ -91,7 +114,7 @@ class ReroutingService:
         completed_deliveries: List[str],
         delayed_location_ids: List[str],
         delay_minutes: Dict[str, int]
-    ) -> Dict[str, Any]:
+    ) -> OptimizationResult:
         """
         Reroute vehicles based on loading/unloading delays.
         
@@ -131,15 +154,30 @@ class ReroutingService:
             consider_time_windows=True
         )
         
-        # Add rerouting metadata
-        new_routes['rerouting_info'] = {
-            'reason': 'service_delay',
-            'delayed_locations': len(delayed_location_ids),
-            'completed_deliveries': len(completed_deliveries),
-            'remaining_deliveries': len(remaining_deliveries)
-        }
+        # Handle both OptimizationResult and dict cases
+        if isinstance(new_routes, OptimizationResult):
+            # Create ReroutingInfo DTO
+            rerouting_info = ReroutingInfo(
+                reason='service_delay',
+                delayed_locations=len(delayed_location_ids),
+                completed_deliveries=len(completed_deliveries),
+                remaining_deliveries=len(remaining_deliveries)
+            )
+            # Add to statistics
+            if not new_routes.statistics:
+                new_routes.statistics = {}
+            new_routes.statistics['rerouting_info'] = vars(rerouting_info)
+        else:
+            # Add rerouting metadata for dict case (backward compatibility)
+            new_routes['rerouting_info'] = {
+                'reason': 'service_delay',
+                'delayed_locations': len(delayed_location_ids),
+                'completed_deliveries': len(completed_deliveries),
+                'remaining_deliveries': len(remaining_deliveries)
+            }
         
         return new_routes
+
     
     def reroute_for_roadblock(
         self,
@@ -148,7 +186,7 @@ class ReroutingService:
         vehicles: List[Vehicle],
         completed_deliveries: List[str],
         blocked_segments: List[Tuple[str, str]]
-    ) -> Dict[str, Any]:
+    ) -> OptimizationResult:
         """
         Reroute vehicles based on road blocks.
         

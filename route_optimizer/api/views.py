@@ -13,8 +13,8 @@ import logging
 
 from route_optimizer.services.optimization_service import OptimizationService
 from route_optimizer.services.rerouting_service import ReroutingService
-from route_optimizer.core.distance_matrix import Location
-from route_optimizer.core.ortools_optimizer import Vehicle, Delivery
+from route_optimizer.core.types_1 import Location
+from route_optimizer.models import Vehicle, Delivery
 from route_optimizer.api.serializers import (
     RouteOptimizationRequestSerializer,
     RouteOptimizationResponseSerializer,

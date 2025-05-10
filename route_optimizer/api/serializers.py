@@ -7,6 +7,8 @@ and the internal data structures used by the route optimizer.
 from rest_framework import serializers
 from typing import Dict, List, Any
 
+from route_optimizer.core.types_1 import validate_optimization_result
+
 
 class LocationSerializer(serializers.Serializer):
     """Serializer for Location objects."""
@@ -17,9 +19,9 @@ class LocationSerializer(serializers.Serializer):
     address = serializers.CharField(max_length=255, required=False, allow_null=True)
     is_depot = serializers.BooleanField(default=False)
     time_window_start = serializers.IntegerField(required=False, allow_null=True, 
-                                               help_text="In minutes from midnight")
+                                              help_text="In minutes from midnight")
     time_window_end = serializers.IntegerField(required=False, allow_null=True,
-                                             help_text="In minutes from midnight")
+                                            help_text="In minutes from midnight")
     service_time = serializers.IntegerField(default=15, help_text="Service time in minutes")
 
 
@@ -54,6 +56,9 @@ class RouteOptimizationRequestSerializer(serializers.Serializer):
     deliveries = DeliverySerializer(many=True)
     consider_traffic = serializers.BooleanField(default=False)
     consider_time_windows = serializers.BooleanField(default=False)
+    use_api = serializers.BooleanField(default=True, required=False)
+    api_key = serializers.CharField(max_length=255, required=False, allow_null=True)
+    traffic_data = serializers.JSONField(required=False, allow_null=True)
 
 
 class RouteSegmentSerializer(serializers.Serializer):
@@ -62,6 +67,12 @@ class RouteSegmentSerializer(serializers.Serializer):
     to_location = serializers.CharField(max_length=100)
     distance = serializers.FloatField()
     estimated_time = serializers.FloatField(help_text="Estimated time in minutes")
+    path_coordinates = serializers.ListField(
+        child=serializers.ListField(child=serializers.FloatField(), min_length=2, max_length=2),
+        required=False,
+        help_text="List of [lat, lng] coordinates for detailed path"
+    )
+    traffic_factor = serializers.FloatField(default=1.0, help_text="Traffic multiplier for this segment")
 
 
 class VehicleRouteSerializer(serializers.Serializer):
@@ -76,18 +87,81 @@ class VehicleRouteSerializer(serializers.Serializer):
         child=serializers.IntegerField(),
         help_text="Mapping of location_id to arrival time in minutes from start"
     )
+    detailed_path = serializers.ListField(
+        child=serializers.ListField(child=serializers.FloatField(), min_length=2, max_length=2),
+        required=False,
+        help_text="Full detailed path as list of [lat, lng] coordinates"
+    )
 
 
-class RouteOptimizationResponseSerializer(serializers.Serializer):
+class ReroutingInfoSerializer(serializers.Serializer):
+    """Serializer for rerouting information."""
+    reason = serializers.CharField(max_length=50)
+    traffic_factors = serializers.IntegerField(required=False, default=0)
+    delayed_locations = serializers.IntegerField(required=False, default=0)
+    blocked_segments = serializers.IntegerField(required=False, default=0)
+    completed_deliveries = serializers.IntegerField(required=False, default=0)
+    remaining_deliveries = serializers.IntegerField(required=False, default=0)
+    optimization_time_ms = serializers.IntegerField(required=False)
+
+
+class StatisticsSerializer(serializers.Serializer):
+    """Serializer for optimization statistics."""
+    total_vehicles = serializers.IntegerField(required=False)
+    used_vehicles = serializers.IntegerField(required=False)
+    total_deliveries = serializers.IntegerField(required=False)
+    assigned_deliveries = serializers.IntegerField(required=False)
+    total_distance = serializers.FloatField(required=False)
+    total_time = serializers.FloatField(required=False)
+    average_capacity_utilization = serializers.FloatField(required=False)
+    computation_time_ms = serializers.IntegerField(required=False)
+    rerouting_info = ReroutingInfoSerializer(required=False)
+    error = serializers.CharField(required=False, allow_null=True)
+
+
+class OptimizationResultSerializer(serializers.Serializer):
+    """Serializer for OptimizationResult objects."""
+    status = serializers.CharField(max_length=50)
+    routes = serializers.ListField(child=serializers.ListField(
+        child=serializers.CharField(max_length=100)
+    ), required=False)
+    total_distance = serializers.FloatField(required=False, default=0.0)
+    total_cost = serializers.FloatField(required=False, default=0.0)
+    assigned_vehicles = serializers.DictField(
+        child=serializers.IntegerField(),
+        required=False
+    )
+    unassigned_deliveries = serializers.ListField(
+        child=serializers.CharField(max_length=100),
+        required=False,
+        default=list
+    )
+    detailed_routes = serializers.ListField(
+        child=serializers.DictField(),
+        required=False,
+        default=list
+    )
+    statistics = StatisticsSerializer(required=False)
+
+    def validate(self, data):
+        """Custom validation for optimization result."""
+        try:
+            validate_optimization_result(data)
+        except ValueError as e:
+            raise serializers.ValidationError(str(e))
+        return data
+
+
+class RouteOptimizationResponseSerializer(OptimizationResultSerializer):
     """Serializer for route optimization responses."""
     status = serializers.CharField(max_length=50)
     total_distance = serializers.FloatField()
     total_cost = serializers.FloatField()
-    routes = VehicleRouteSerializer(many=True)
+    routes = VehicleRouteSerializer(many=True, required=False)
     unassigned_deliveries = serializers.ListField(
         child=serializers.CharField(max_length=100), default=list
     )
-    statistics = serializers.DictField(child=serializers.CharField(), default=dict)
+    statistics = StatisticsSerializer(required=False)
 
 
 class TrafficDataSerializer(serializers.Serializer):
@@ -97,9 +171,16 @@ class TrafficDataSerializer(serializers.Serializer):
             child=serializers.CharField(max_length=100),
             min_length=2,
             max_length=2
-        )
+        ),
+        required=False
     )
-    factors = serializers.ListField(child=serializers.FloatField())
+    factors = serializers.ListField(child=serializers.FloatField(), required=False)
+    # Alternative structure
+    segments = serializers.DictField(
+        child=serializers.FloatField(),
+        help_text="Dict mapping 'from_id-to_id' to traffic factor",
+        required=False
+    )
 
 
 class ReroutingRequestSerializer(serializers.Serializer):
@@ -130,3 +211,5 @@ class ReroutingRequestSerializer(serializers.Serializer):
         choices=['traffic', 'delay', 'roadblock'],
         default='traffic'
     )
+    use_api = serializers.BooleanField(default=True, required=False)
+    api_key = serializers.CharField(max_length=255, required=False, allow_null=True)

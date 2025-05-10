@@ -1,10 +1,11 @@
 from typing import Any, Dict, List
+from venv import logger
 import numpy as np
 from ortools.constraint_solver import pywrapcp
 from ortools.constraint_solver import routing_enums_pb2
 
-from distance_matrix import Location
-from ortools_optimizer import Delivery, Vehicle
+from route_optimizer.core.types_1 import Location
+from route_optimizer.models import Vehicle, Delivery
 
 
 def solve_with_time_windows(
@@ -43,11 +44,20 @@ def solve_with_time_windows(
     # Convert distance to travel time (in seconds)
     time_matrix = (distance_matrix / speed_km_per_hour) * 3600  # hours to seconds
     
-    # Create distance and time callbacks
     def distance_callback(from_index, to_index):
-        from_node = manager.IndexToNode(from_index)
-        to_node = manager.IndexToNode(to_index)
-        return int(distance_matrix[from_node][to_node] * 100)  # Convert to integer (cm)
+        """Returns the distance between the two nodes."""
+        try:
+            # Convert from routing variable Index to distance matrix NodeIndex
+            from_node = manager.IndexToNode(from_index)
+            to_node = manager.IndexToNode(to_index)
+            
+            # Scale value to keep within int64 range
+            # Using a smaller scale factor (100 instead of 1000) to avoid overflow
+            return int(distance_matrix[from_node][to_node] * 100)
+        except OverflowError:
+            logger.warning(f"OverflowError in distance callback for indices: {from_index}, {to_index}")
+            # Return a large but valid distance as fallback
+            return 2147483647  # Maximum positive 32-bit integer
     
     def time_callback(from_index, to_index):
         from_node = manager.IndexToNode(from_index)

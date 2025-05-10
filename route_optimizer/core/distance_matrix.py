@@ -7,13 +7,15 @@ that are used in route optimization algorithms.
 from typing import Dict, List, Tuple, Optional, Any
 import logging
 import numpy as np
-from dataclasses import dataclass
 import time
 import json
 import hashlib
 import requests
 from datetime import datetime, timedelta
 from urllib.parse import quote
+
+from route_optimizer.core.types_1 import Location
+from route_optimizer.models import DistanceMatrixCache
 
 from route_optimizer.settings import (
     CACHE_EXPIRY_DAYS,
@@ -23,24 +25,8 @@ from route_optimizer.settings import (
     BACKOFF_FACTOR,
     RETRY_DELAY_SECONDS
 )
-from route_optimizer.models import Location, DistanceMatrixCache
 
 logger = logging.getLogger(__name__)
-
-
-
-@dataclass
-class Location:
-    """Class representing a location with coordinates and metadata."""
-    id: str
-    name: str
-    latitude: float
-    longitude: float
-    address: Optional[str] = None
-    is_depot: bool = False
-    time_window_start: Optional[int] = None  # In minutes from midnight
-    time_window_end: Optional[int] = None    # In minutes from midnight
-    service_time: int = 15  # Default service time in minutes
 
 
 class DistanceMatrixBuilder:
@@ -51,7 +37,8 @@ class DistanceMatrixBuilder:
     @staticmethod
     def create_distance_matrix(
         locations: List[Location],
-        use_haversine: bool = True
+        use_haversine: bool = True,
+        distance_calculation: str = None  # Add this parameter
     ) -> Tuple[np.ndarray, List[str]]:
         """
         Create a distance matrix from a list of locations.
@@ -66,6 +53,11 @@ class DistanceMatrixBuilder:
             - 2D numpy array representing distances between locations
             - List of location IDs corresponding to the matrix indices
         """
+        if distance_calculation:
+            if distance_calculation == "haversine":
+                use_haversine = True
+            elif distance_calculation == "euclidean":
+                use_haversine = False
         num_locations = len(locations)
         distance_matrix = np.zeros((num_locations, num_locations))
         location_ids = [loc.id for loc in locations]
@@ -117,7 +109,18 @@ class DistanceMatrixBuilder:
                     graph[from_id][to_id] = distance_matrix[i, j]
         
         return graph
-
+    
+    @staticmethod
+    def _get_api_key():
+        """
+        Get the Google Maps API key from settings.
+        
+        Returns:
+            str: The API key
+        """
+        from route_optimizer.settings import GOOGLE_MAPS_API_KEY
+        return GOOGLE_MAPS_API_KEY
+                                
     @staticmethod
     def _haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
         """

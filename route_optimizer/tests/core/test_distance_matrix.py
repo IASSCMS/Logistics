@@ -85,50 +85,55 @@ class TestDistanceMatrixBuilder(unittest.TestCase):
         """Test creating a distance matrix using Google Maps API."""
         # Mock the Google Maps API response
         mock_response = MagicMock()
-        mock_response.status_code = 200
         mock_response.json.return_value = {
             'status': 'OK',
             'rows': [
                 {
                     'elements': [
-                        {'status': 'OK', 'distance': {'value': 0}},
-                        {'status': 'OK', 'distance': {'value': 10000}},
-                        {'status': 'OK', 'distance': {'value': 20000}},
-                        {'status': 'OK', 'distance': {'value': 30000}}
+                        {'status': 'OK', 'distance': {'value': 0}, 'duration': {'value': 0}},
+                        {'status': 'OK', 'distance': {'value': 10000}, 'duration': {'value': 600}},
+                        {'status': 'OK', 'distance': {'value': 20000}, 'duration': {'value': 1200}},
+                        {'status': 'OK', 'distance': {'value': 30000}, 'duration': {'value': 1800}}
                     ]
                 },
                 {
                     'elements': [
-                        {'status': 'OK', 'distance': {'value': 10000}},
-                        {'status': 'OK', 'distance': {'value': 0}},
-                        {'status': 'OK', 'distance': {'value': 15000}},
-                        {'status': 'OK', 'distance': {'value': 25000}}
+                        {'status': 'OK', 'distance': {'value': 10000}, 'duration': {'value': 600}},
+                        {'status': 'OK', 'distance': {'value': 0}, 'duration': {'value': 0}},
+                        {'status': 'OK', 'distance': {'value': 15000}, 'duration': {'value': 900}},
+                        {'status': 'OK', 'distance': {'value': 25000}, 'duration': {'value': 1500}}
                     ]
                 },
                 {
                     'elements': [
-                        {'status': 'OK', 'distance': {'value': 20000}},
-                        {'status': 'OK', 'distance': {'value': 15000}},
-                        {'status': 'OK', 'distance': {'value': 0}},
-                        {'status': 'OK', 'distance': {'value': 10000}}
+                        {'status': 'OK', 'distance': {'value': 20000}, 'duration': {'value': 1200}},
+                        {'status': 'OK', 'distance': {'value': 15000}, 'duration': {'value': 900}},
+                        {'status': 'OK', 'distance': {'value': 0}, 'duration': {'value': 0}},
+                        {'status': 'OK', 'distance': {'value': 10000}, 'duration': {'value': 600}}
                     ]
                 },
                 {
                     'elements': [
-                        {'status': 'OK', 'distance': {'value': 30000}},
-                        {'status': 'OK', 'distance': {'value': 25000}},
-                        {'status': 'OK', 'distance': {'value': 10000}},
-                        {'status': 'OK', 'distance': {'value': 0}}
+                        {'status': 'OK', 'distance': {'value': 30000}, 'duration': {'value': 1800}},
+                        {'status': 'OK', 'distance': {'value': 25000}, 'duration': {'value': 1500}},
+                        {'status': 'OK', 'distance': {'value': 10000}, 'duration': {'value': 600}},
+                        {'status': 'OK', 'distance': {'value': 0}, 'duration': {'value': 0}}
                     ]
                 }
             ]
         }
         mock_get.return_value = mock_response
         
-        with patch.object(self.builder, '_get_api_key', return_value='dummy_key'):
-            matrix, location_ids = self.builder.create_distance_matrix(
+        # Make sure the API request is actually being called by inspecting the implementation
+        # First, make sure the method is even calling the API by checking if it falls back to Haversine
+        
+        # Patch the _make_api_request method to ensure it's called and returns our mock data
+        with patch.object(DistanceMatrixBuilder, '_send_request_with_retry', return_value=mock_response.json.return_value):
+            # Call the correct method that uses the Google API
+            matrix, location_ids = DistanceMatrixBuilder.create_distance_matrix_from_api(
                 self.locations, 
-                distance_calculation="google"
+                api_key='dummy_key',
+                use_cache=False  # Disable caching for the test
             )
             
             # Check matrix shape
@@ -150,23 +155,24 @@ class TestDistanceMatrixBuilder(unittest.TestCase):
         """Test fallback to Haversine when Google API fails."""
         # Mock a failed API response
         mock_response = MagicMock()
-        mock_response.status_code = 400
+        mock_response.json.return_value = {'status': 'INVALID_REQUEST', 'error_message': 'API error'}
         mock_get.return_value = mock_response
         
-        with patch.object(self.builder, '_get_api_key', return_value='dummy_key'):
-            with patch.object(self.builder, '_haversine_distance', return_value=10.0):
-                matrix, location_ids = self.builder.create_distance_matrix(
-                    self.locations, 
-                    distance_calculation="google"
-                )
-                
-                # Should have fallen back to Haversine
-                self.assertEqual(matrix.shape, (4, 4))
-                # All non-diagonal entries should be 10.0 due to our mock
-                for i in range(4):
-                    for j in range(4):
-                        if i != j:
-                            self.assertEqual(matrix[i, j], 10.0)
+        # Also patch the Haversine method to return a predictable value
+        with patch.object(DistanceMatrixBuilder, '_haversine_distance', return_value=10.0):
+            matrix, location_ids = self.builder.create_distance_matrix_from_api(
+                self.locations, 
+                api_key='dummy_key',
+                use_cache=False  # Disable caching for the test
+            )
+            
+            # Should have fallen back to Haversine
+            self.assertEqual(matrix.shape, (4, 4))
+            # All non-diagonal entries should be 10.0 due to our mock
+            for i in range(4):
+                for j in range(4):
+                    if i != j:
+                        self.assertEqual(matrix[i, j], 10.0)
 
     def test_add_traffic_factors(self):
         """Test adding traffic factors to a distance matrix."""

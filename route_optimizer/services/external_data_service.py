@@ -12,7 +12,7 @@ import json
 import requests
 from urllib.parse import urlencode
 
-from route_optimizer.core.distance_matrix import Location
+from route_optimizer.core.types_1 import Location
 
 # Set up logging
 logger = logging.getLogger(__name__)
