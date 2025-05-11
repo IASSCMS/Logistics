@@ -371,7 +371,7 @@ class DistanceMatrixBuilder:
             for i in range(num_locations):
                 for j in range(num_locations):
                     # API returns distances in meters, convert to kilometers
-                    distance_matrix[i, j] = api_matrix[i][j] / DISTANCE_SCALING_FACTOR
+                    distance_matrix[i, j] = api_matrix[i][j] / 1000.0
             
             # Cache the result
             if use_cache:

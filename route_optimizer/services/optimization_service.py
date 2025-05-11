@@ -1,6 +1,8 @@
 import logging
+import numpy as np
 
 from typing import List, Dict, Any, Optional, Union
+from route_optimizer.core.constants import MAX_SAFE_DISTANCE
 from route_optimizer.services.path_annotation_service import PathAnnotator
 from route_optimizer.core.dijkstra import DijkstraPathFinder
 from route_optimizer.core.ortools_optimizer import ORToolsVRPSolver
@@ -62,12 +64,13 @@ class OptimizationService:
             graph: The graph representation of the distance matrix
             location_ids: Optional list of location IDs
         """
+        logger.info("Starting _add_detailed_paths method")
         # Handle both Dict and OptimizationResult types
         if isinstance(result, OptimizationResult):
             # Working with DTO
             if not result.detailed_routes:
                 result.detailed_routes = []
-                
+            
             # Add routes if available and detailed_routes is empty
             if result.routes and not result.detailed_routes:
                 for route_idx, route in enumerate(result.routes):
@@ -142,10 +145,11 @@ class OptimizationService:
                 # Add default vehicle_id if still missing
                 if 'vehicle_id' not in route:
                     route['vehicle_id'] = f"unknown_{route_idx}"
-        
+        logger.info("About to call annotator.annotate")
         # Add detailed paths using the annotator
         annotator = PathAnnotator(self.path_finder)
         annotator.annotate(result, graph)
+        logger.info("Finished annotator.annotate call")
         
         # # Validate final result if it's a dict
         # if isinstance(result, dict):
@@ -239,7 +243,110 @@ class OptimizationService:
                 detailed_routes=[],
                 statistics={'error': f"Conversion error: {str(e)}"}
             )
+
+    def _sanitize_distance_matrix(self, matrix):
+        """
+        Sanitize distance matrix by replacing infinite or extreme values.
         
+        Args:
+            matrix: Distance matrix to sanitize
+            
+        Returns:
+            Sanitized matrix
+        """
+        if matrix is None:
+            return np.zeros((1, 1))
+        
+        # Make a copy to avoid modifying the original
+        sanitized = np.array(matrix, dtype=float)
+        
+        # Define the maximum safe distance value
+        max_safe_value = MAX_SAFE_DISTANCE  # This should be defined in your constants
+        
+        # Replace any NaN values with a large but valid distance
+        sanitized = np.nan_to_num(sanitized, nan=max_safe_value)
+        
+        # Replace any infinite values with a large but valid distance
+        sanitized[np.isinf(sanitized)] = max_safe_value
+        
+        # Cap any excessively large values
+        sanitized[sanitized > max_safe_value] = max_safe_value
+        
+        # Ensure all values are non-negative
+        sanitized[sanitized < 0] = 0
+        
+        return sanitized
+
+    def _apply_traffic_safely(self, distance_matrix, traffic_data):
+        """
+        Apply traffic factors to distance matrix with bounds checking.
+        
+        Args:
+            distance_matrix: Original distance matrix
+            traffic_data: Dictionary mapping (from_idx, to_idx) to traffic factors
+            
+        Returns:
+            Updated distance matrix
+        """
+        # Make a copy to avoid modifying the original
+        matrix_with_traffic = np.array(distance_matrix, dtype=float)
+        
+        # Get matrix dimensions
+        rows, cols = matrix_with_traffic.shape
+        
+        # Define maximum safe factor to prevent overflow
+        max_safe_factor = 5.0  # Adjust this value based on your use case
+        
+        for (from_idx, to_idx), factor in traffic_data.items():
+            # Validate indices
+            if 0 <= from_idx < rows and 0 <= to_idx < cols:
+                # Validate factor (ensure it's within reasonable bounds)
+                safe_factor = min(max(float(factor), 1.0), max_safe_factor)
+                
+                # Apply the factor
+                matrix_with_traffic[from_idx, to_idx] *= safe_factor
+                
+                # Log if factor was capped
+                if safe_factor != factor:
+                    logger.warning(f"Traffic factor capped from {factor} to {safe_factor} for route ({from_idx},{to_idx})")
+        
+        return matrix_with_traffic
+
+    def _convert_to_optimization_result(self, result_dict):
+        """
+        Convert a result dictionary to an OptimizationResult object.
+        
+        Args:
+            result_dict: Dictionary with optimization results
+            
+        Returns:
+            OptimizationResult object
+        """
+        try:
+            return OptimizationResult(
+                status=result_dict.get('status', 'unknown'),
+                routes=result_dict.get('routes', []),
+                total_distance=result_dict.get('total_distance', 0.0),
+                total_cost=result_dict.get('total_cost', 0.0),
+                assigned_vehicles=result_dict.get('assigned_vehicles', {}),
+                unassigned_deliveries=result_dict.get('unassigned_deliveries', []),
+                detailed_routes=result_dict.get('detailed_routes', []),
+                statistics=result_dict.get('statistics', {})
+            )
+        except Exception as e:
+            logger.warning(f"Failed to convert dict to OptimizationResult: {e}")
+            # Return a basic result
+            return OptimizationResult(
+                status='error',
+                routes=[],
+                total_distance=0.0,
+                total_cost=0.0,
+                assigned_vehicles={},
+                unassigned_deliveries=[],
+                detailed_routes=[],
+                statistics={'error': f"Conversion error: {str(e)}"}
+            )
+
     def optimize_routes(
         self,
         locations: List[Location],

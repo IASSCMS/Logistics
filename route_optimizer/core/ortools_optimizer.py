@@ -100,6 +100,33 @@ class ORToolsVRPSolver:
         starts = []
         ends = []
         
+        # Special case: No deliveries, create direct depot-to-depot routes
+        if not deliveries:
+            routes = []
+            assigned_vehicles = {}
+            
+            # For each vehicle, create a direct depot-to-depot route
+            for idx, vehicle in enumerate(vehicles):
+                # Get the start and end location IDs
+                start_location_id = vehicle.start_location_id
+                end_location_id = vehicle.end_location_id or vehicle.start_location_id
+                
+                # Create a direct route from start to end
+                route = [start_location_id, end_location_id]
+                routes.append(route)
+                assigned_vehicles[vehicle.id] = idx
+            
+            return OptimizationResult(
+                status='success',
+                routes=routes,
+                total_distance=0.0,  # Since we're not calculating actual distances
+                total_cost=0.0,      # No cost for empty routes
+                assigned_vehicles=assigned_vehicles,
+                unassigned_deliveries=[],
+                detailed_routes=[],
+                statistics={'info': 'Empty problem: direct depot-to-depot routes created'}
+            )
+            
         for vehicle in vehicles:
             try:
                 start_idx = location_id_to_index[vehicle.start_location_id]

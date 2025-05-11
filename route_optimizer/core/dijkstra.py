@@ -51,28 +51,58 @@ class DijkstraPathFinder:
             logger.warning(f"Start node '{start}' or end node '{end}' not in graph")
             return None, None
 
-        queue = [(0, start, [start])]
-        visited: Set[str] = set()
+        # Initialize distances dictionary with infinity for all nodes except start
+        distances = {node: float('inf') for node in graph}
+        distances[start] = 0
+        
+        # Keep track of previous nodes to reconstruct the path
+        previous = {node: None for node in graph}
+        
+        # Priority queue with (distance, node)
+        queue = [(0, start)]
+        # Set to keep track of processed nodes
+        processed = set()
 
         while queue:
-            (dist, current, path) = heapq.heappop(queue)
-
-            if current in visited:
+            # Get the node with the smallest distance
+            current_distance, current_node = heapq.heappop(queue)
+            
+            # If we've already processed this node, skip it
+            if current_node in processed:
                 continue
-
-            visited.add(current)
-
-            if current == end:
-                return path, dist
-
-            for neighbor, distance in graph[current].items():
-                if neighbor not in visited:
-                    new_dist = dist + distance
-                    new_path = path + [neighbor]
-                    heapq.heappush(queue, (new_dist, neighbor, new_path))
-
+                
+            # Mark the node as processed
+            processed.add(current_node)
+            
+            # If we've reached the end node, reconstruct and return the path
+            if current_node == end:
+                path = []
+                while current_node is not None:
+                    path.insert(0, current_node)
+                    current_node = previous[current_node]
+                return path, current_distance
+                
+            # Check all neighbors of the current node
+            for neighbor, weight in graph[current_node].items():
+                # Skip if we've already processed this neighbor
+                if neighbor in processed:
+                    continue
+                    
+                # Calculate new distance to neighbor
+                distance = current_distance + weight
+                
+                # If we found a better path to the neighbor
+                if distance < distances[neighbor]:
+                    # Update the distance
+                    distances[neighbor] = distance
+                    # Remember which node we came from
+                    previous[neighbor] = current_node
+                    # Add to the priority queue
+                    heapq.heappush(queue, (distance, neighbor))
+        
         logger.warning(f"No path found from '{start}' to '{end}'")
         return None, None
+
 
     @staticmethod
     def calculate_all_shortest_paths(

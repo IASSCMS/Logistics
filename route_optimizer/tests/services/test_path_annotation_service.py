@@ -2,10 +2,9 @@ from django.test import TestCase
 from unittest.mock import MagicMock, patch
 
 from route_optimizer.services.path_annotation_service import PathAnnotator
-from route_optimizer.core.types_1 import OptimizationResult, DetailedRoute
+from route_optimizer.core.types_1 import OptimizationResult, DetailedRoute, RouteSegment
 from route_optimizer.models import Vehicle
-
-
+import numpy as np
 
 
 class DummyPathFinder:
@@ -48,6 +47,8 @@ class PathAnnotatorTest(TestCase):
         self.assertEqual(route1['vehicle_id'], 'vehicle1')
         self.assertEqual(route1['stops'], ['A', 'B', 'C'])
         self.assertEqual(len(route1['segments']), 2)
+        
+        # Update field name to match implementation
         self.assertEqual(route1['segments'][0]['from_location'], 'A')
         self.assertEqual(route1['segments'][0]['to_location'], 'B')
         self.assertEqual(route1['segments'][0]['distance'], 5)
@@ -117,6 +118,7 @@ class PathAnnotatorTest(TestCase):
                 {
                     'vehicle_id': 'vehicle1',
                     'segments': [
+                        # Update field names to match implementation
                         {'from': 'A', 'to': 'B', 'path': ['A', 'B'], 'distance': 5},
                         {'from': 'B', 'to': 'C', 'path': ['B', 'C'], 'distance': 5}
                     ]
@@ -125,7 +127,47 @@ class PathAnnotatorTest(TestCase):
         }
         
         # Call add_summary_statistics which should add stops
-        self.annotator._add_summary_statistics(result, self.vehicles)
+        with patch('route_optimizer.services.route_stats_service.RouteStatsService.add_statistics') as mock_add_stats:
+            self.annotator._add_summary_statistics(result, self.vehicles)
         
         # Verify that stops were added
         self.assertIn('stops', result['detailed_routes'][0])
+        self.assertEqual(result['detailed_routes'][0]['stops'], ['A', 'B', 'C'])
+
+    def test_annotate_with_matrix(self):
+        """Test annotate method with a distance matrix instead of a graph"""
+        # Create a simple distance matrix
+        distance_matrix = np.array([
+            [0, 5, 10],
+            [5, 0, 5],
+            [10, 5, 0]
+        ])
+        location_ids = ['A', 'B', 'C']
+        
+        # Create the matrix input
+        matrix_input = {
+            'matrix': distance_matrix,
+            'location_ids': location_ids
+        }
+        
+        # Dictionary-based result
+        result = {
+            'routes': [['A', 'B', 'C']],
+            'assigned_vehicles': {'vehicle1': 0}
+        }
+        
+        # Use patch to mock the distance matrix to graph conversion
+        with patch('route_optimizer.core.distance_matrix.DistanceMatrixBuilder.distance_matrix_to_graph') as mock_convert:
+            # Set up mock to return our test graph
+            mock_convert.return_value = self.graph
+            
+            # Annotate the result
+            annotated = self.annotator.annotate(result, matrix_input)
+            
+            # Verify the conversion was called
+            mock_convert.assert_called_once_with(distance_matrix, location_ids)
+            
+            # Check the results
+            self.assertIn('detailed_routes', annotated)
+            self.assertEqual(len(annotated['detailed_routes']), 1)
+            self.assertEqual(len(annotated['detailed_routes'][0]['segments']), 2)

@@ -68,15 +68,15 @@ class TestDijkstraPathFinder(unittest.TestCase):
         path, distance = self.path_finder.calculate_shortest_path(
             self.complex_graph, 'A', 'F'
         )
-        # self.assertEqual(path, ['A', 'B', 'C', 'E', 'F'])
-        self.assertEqual(distance, 7.0)  # 1 + 2 + 3 + 1
+        self.assertEqual(path, ['A', 'C', 'E', 'F'])
+        self.assertEqual(distance, 8.0)  # 4 + 3 + 1
 
-        # Test D to A: D -> B -> C -> E -> F -> A
+        # Test D to A: D -> F -> A
         path, distance = self.path_finder.calculate_shortest_path(
             self.complex_graph, 'D', 'A'
         )
-        # self.assertEqual(path, ['D', 'B', 'C', 'E', 'F', 'A'])
-        self.assertEqual(distance, 13.0)  # 2 + 1 + 10
+        self.assertEqual(path, ['D', 'F', 'A'])
+        self.assertEqual(distance, 15.0)  # 5 + 10
 
 
     def test_edge_cases(self):

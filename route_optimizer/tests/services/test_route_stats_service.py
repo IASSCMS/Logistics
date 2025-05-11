@@ -26,6 +26,8 @@ class RouteStatsServiceTest(TestCase):
         self.assertIn('1', result['vehicle_costs'])
         self.assertEqual(result['vehicle_costs']['1']['fixed_cost'], 100)
         self.assertEqual(result['vehicle_costs']['1']['variable_cost'], 12 * 10)
+        # Check both cost and total_cost keys
+        self.assertEqual(result['vehicle_costs']['1']['cost'], 100 + (12 * 10))
         self.assertEqual(result['vehicle_costs']['1']['total_cost'], 100 + (12 * 10))
         self.assertEqual(result['vehicle_costs']['1']['distance'], 12)
         
@@ -60,6 +62,8 @@ class RouteStatsServiceTest(TestCase):
         self.assertIn('2', result['vehicle_costs'])
         self.assertEqual(result['vehicle_costs']['2']['fixed_cost'], 50)
         self.assertEqual(result['vehicle_costs']['2']['variable_cost'], 0)
+        # Check both cost and total_cost keys
+        self.assertEqual(result['vehicle_costs']['2']['cost'], 50)
         self.assertEqual(result['vehicle_costs']['2']['total_cost'], 50)
         
         # Check summary statistics
@@ -93,8 +97,10 @@ class RouteStatsServiceTest(TestCase):
         # Check total cost (75 + 10*8) + (60 + 20*6) = 155 + 180 = 335
         self.assertEqual(result['total_cost'], 335)
         
-        # Check vehicle costs
+        # Check vehicle costs - test both cost and total_cost
+        self.assertEqual(result['vehicle_costs']['3']['cost'], 155)
         self.assertEqual(result['vehicle_costs']['3']['total_cost'], 155)
+        self.assertEqual(result['vehicle_costs']['4']['cost'], 180)
         self.assertEqual(result['vehicle_costs']['4']['total_cost'], 180)
         
         # Check summary statistics

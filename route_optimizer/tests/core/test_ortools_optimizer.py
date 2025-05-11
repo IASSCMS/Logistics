@@ -52,11 +52,11 @@ class TestORToolsVRPSolver(unittest.TestCase):
             )
         ]
         
-        # Sample deliveries
+        # Sample deliveries - using the demand property that's properly implemented
         self.deliveries = [
-            Delivery(id="delivery1", location_id="customer1", demand=5.0),  # Changed from demand to size
-            Delivery(id="delivery2", location_id="customer2", demand=3.0),
-            Delivery(id="delivery3", location_id="customer3", demand=6.0)
+            Delivery(id="delivery1", location_id="customer1", demand=5.0, is_pickup=False),
+            Delivery(id="delivery2", location_id="customer2", demand=3.0, is_pickup=False),
+            Delivery(id="delivery3", location_id="customer3", demand=6.0, is_pickup=False)
         ]
 
     def test_basic_routing(self):
@@ -142,6 +142,35 @@ class TestORToolsVRPSolver(unittest.TestCase):
             self.assertEqual(route[0], 'depot')
             self.assertEqual(route[1], 'depot')
 
+    def test_pickup_and_delivery(self):
+        """Test handling of pickup and delivery operations."""
+        # Create deliveries with both pickup and delivery operations
+        mixed_deliveries = [
+            Delivery(id="pickup1", location_id="customer1", demand=5.0, is_pickup=True),
+            Delivery(id="delivery1", location_id="customer2", demand=3.0, is_pickup=False),
+            Delivery(id="delivery2", location_id="customer3", demand=6.0, is_pickup=False)
+        ]
+        
+        result = self.solver.solve(
+            distance_matrix=self.distance_matrix,
+            location_ids=self.location_ids,
+            vehicles=self.vehicles,
+            deliveries=mixed_deliveries,
+            depot_index=0
+        )
+        
+        # Verify result is successful
+        if result.status == 'success':
+            # All deliveries should be assigned
+            self.assertEqual(len(result.unassigned_deliveries), 0)
+            
+            # Verify routes contain all locations
+            all_visits = []
+            for route in result.routes:
+                all_visits.extend(route[1:-1])  # Exclude depot at start and end
+            
+            self.assertEqual(set(all_visits), {'customer1', 'customer2', 'customer3'})
+
     def test_time_windows(self):
         """Test routing with time windows."""
         locations_with_tw = [
@@ -190,7 +219,7 @@ class TestORToolsVRPSolver(unittest.TestCase):
             speed_km_per_hour=60.0
         )
 
-        # Check required keys (solve_with_time_windows still returns a dict)
+        # Check required keys (solve_with_time_windows returns a dict)
         self.assertIn('status', solution)
         self.assertIn('routes', solution)
 
@@ -199,9 +228,10 @@ class TestORToolsVRPSolver(unittest.TestCase):
             for route in solution['routes']:
                 for stop in route:
                     loc_id = stop['location_id']
-                    arrival_minutes = stop['arrival_time_seconds'] // TIME_SCALING_FACTOR  # Convert seconds to minutes
+                    arrival_seconds = stop['arrival_time_seconds']
+                    arrival_minutes = arrival_seconds // TIME_SCALING_FACTOR  # Convert to minutes
+                    
                     location = next((l for l in locations_with_tw if l.id == loc_id), None)
-
                     if location and location.time_window_start is not None and location.time_window_end is not None:
                         self.assertGreaterEqual(
                             arrival_minutes, location.time_window_start,

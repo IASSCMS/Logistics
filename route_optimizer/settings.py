@@ -8,8 +8,8 @@ try:
     from route_optimizer.utils.env_loader import load_env_from_file
     # Try different possible locations for the env file
     env_paths = [
-        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'env_var.env'),  # Root directory
         os.path.join(os.path.dirname(os.path.dirname(__file__)), 'env_var.env'),  # App directory
+        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'env_var.env'),  # Root directory
     ]
     
     for path in env_paths:
