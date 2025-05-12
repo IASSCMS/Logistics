@@ -101,3 +101,158 @@ http://127.0.0.1:8000/swagger/
 You’ll see an interactive **Swagger UI** listing all available API endpoints (e.g., `/api/fleet/vehicles/`).
 
 
+
+```
+Logistics
+├─ .pytest_cache
+│  ├─ CACHEDIR.TAG
+│  ├─ README.md
+│  └─ v
+│     └─ cache
+│        ├─ lastfailed
+│        ├─ nodeids
+│        └─ stepwise
+├─ assignment
+│  ├─ admin.py
+│  ├─ apps.py
+│  ├─ migrations
+│  │  ├─ 0001_initial.py
+│  │  └─ __init__.py
+│  ├─ models.py
+│  ├─ serializers.py
+│  ├─ tests.py
+│  ├─ urls.py
+│  ├─ views.py
+│  └─ __init__.py
+├─ docker-compose.yml
+├─ fleet
+│  ├─ admin.py
+│  ├─ apps.py
+│  ├─ migrations
+│  │  ├─ 0001_initial.py
+│  │  ├─ 0002_vehicle_created_at_vehicle_current_latitude_and_more.py
+│  │  ├─ 0003_remove_fuelrecord_vehicle_and_more.py
+│  │  └─ __init__.py
+│  ├─ models
+│  │  ├─ core.py
+│  │  ├─ extended_models.py
+│  │  └─ __init__.py
+│  ├─ serializers
+│  │  ├─ fuel.py
+│  │  ├─ maintenance.py
+│  │  ├─ trip.py
+│  │  ├─ vehicle.py
+│  │  └─ __init__.py
+│  ├─ tests
+│  │  ├─ test_fuel.py
+│  │  ├─ test_fuel_api.py
+│  │  ├─ test_maintenance.py
+│  │  ├─ test_maintenance_api.py
+│  │  ├─ test_trip.py
+│  │  ├─ test_trip_api.py
+│  │  ├─ test_vehicle.py
+│  │  ├─ test_vehicle_api.py
+│  │  └─ __init__.py
+│  ├─ urls.py
+│  ├─ views
+│  │  ├─ fuel.py
+│  │  ├─ maintenance.py
+│  │  ├─ trip.py
+│  │  ├─ vehicle.py
+│  │  └─ __init__.py
+│  └─ __init__.py
+├─ LICENSE
+├─ logistics_core
+│  ├─ asgi.py
+│  ├─ settings.py
+│  ├─ urls.py
+│  ├─ wsgi.py
+│  └─ __init__.py
+├─ manage.py
+├─ monitoring
+│  ├─ admin.py
+│  ├─ apps.py
+│  ├─ migrations
+│  │  └─ __init__.py
+│  ├─ models.py
+│  ├─ tests.py
+│  ├─ views.py
+│  └─ __init__.py
+├─ order_simulator.py
+├─ README.md
+├─ requirements.txt
+├─ route_optimizer
+│  ├─ admin.py
+│  ├─ api
+│  │  ├─ serializers.py
+│  │  ├─ urls.py
+│  │  ├─ views.py
+│  │  └─ __init__.py
+│  ├─ apps.py
+│  ├─ core
+│  │  ├─ constants.py
+│  │  ├─ dijkstra.py
+│  │  ├─ distance_matrix.py
+│  │  ├─ ortools_optimizer.py
+│  │  ├─ types_1.py
+│  │  └─ __init__.py
+│  ├─ migrations
+│  │  ├─ 0001_initial.py
+│  │  └─ __init__.py
+│  ├─ models.py
+│  ├─ services
+│  │  ├─ depot_service.py
+│  │  ├─ external_data_service.py
+│  │  ├─ optimization_service.py
+│  │  ├─ path_annotation_service.py
+│  │  ├─ rerouting_service.py
+│  │  ├─ route_stats_service.py
+│  │  ├─ traffic_service.py
+│  │  ├─ vrp_solver.py
+│  │  └─ __init__.py
+│  ├─ settings.py
+│  ├─ tests
+│  │  ├─ conftest.py
+│  │  ├─ core
+│  │  │  ├─ test_dijkstra.py
+│  │  │  ├─ test_distance_matrix.py
+│  │  │  ├─ test_ortools_optimizer.py
+│  │  │  └─ __init__.py
+│  │  ├─ services
+│  │  │  ├─ test_depot_service.py
+│  │  │  ├─ test_optimization_service.py
+│  │  │  ├─ test_path_annotation_service.py
+│  │  │  ├─ test_route_stats_service.py
+│  │  │  ├─ test_traffic_service.py
+│  │  │  └─ __init__.py
+│  │  ├─ test_settings.py
+│  │  └─ __init__.py
+│  ├─ utils
+│  │  ├─ env_loader.py
+│  │  ├─ helpers.py
+│  │  └─ __init__.py
+│  ├─ views.py
+│  └─ __init__.py
+└─ shipments
+   ├─ admin.py
+   ├─ apps.py
+   ├─ consumers
+   │  └─ order_events.py
+   ├─ management
+   │  └─ commands
+   │     └─ consume_orders.py
+   ├─ migrations
+   │  ├─ 0001_initial.py
+   │  └─ __init__.py
+   ├─ models.py
+   ├─ serializers.py
+   ├─ tests
+   │  ├─ test_api.py
+   │  ├─ test_consumer.py
+   │  ├─ test_integration_kafka.py
+   │  └─ __init__.py
+   ├─ urls.py
+   ├─ views.py
+   └─ __init__.py
+
+```

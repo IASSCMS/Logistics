@@ -189,6 +189,7 @@ class PathAnnotator:
                 except Exception as e:
                     logger.error(f"Error calculating path from {from_location} to {to_location}: {e}")
                     # Add a placeholder segment with error information
+                    path, distance = [from_location, to_location], 0.0
                     segments.append({
                         'from_location': from_location,
                         'to_location': to_location,

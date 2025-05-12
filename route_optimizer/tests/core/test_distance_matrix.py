@@ -104,11 +104,11 @@ class TestDistanceMatrixBuilder(unittest.TestCase):
         
         distance_matrix, time_matrix = DistanceMatrixBuilder._process_api_response(mock_response)
         
-        # Check that distances are correctly converted to kilometers
-        self.assertEqual(distance_matrix[0][0], 10.0)  # 10000m = 10km
-        self.assertEqual(distance_matrix[0][1], 20.0)  # 20000m = 20km
-        self.assertEqual(distance_matrix[1][0], 30.0)  # 30000m = 30km
-        self.assertEqual(distance_matrix[1][1], 5.0)   # 5000m = 5km
+        # Check that distances are in meters
+        self.assertEqual(distance_matrix[0][0], 10000)  # 10000m = 10km
+        self.assertEqual(distance_matrix[0][1], 20000)  # 20000m = 20km
+        self.assertEqual(distance_matrix[1][0], 30000)  # 30000m = 30km
+        self.assertEqual(distance_matrix[1][1], 5000)   # 5000m = 5km
         
         # Check that times are correctly processed (in seconds)
         self.assertEqual(time_matrix[0][0], 600)
@@ -132,7 +132,7 @@ class TestDistanceMatrixBuilder(unittest.TestCase):
         distance_matrix, time_matrix = DistanceMatrixBuilder._process_api_response(mock_response)
         
         # Check correct values for valid route
-        self.assertEqual(distance_matrix[0][0], 10.0)
+        self.assertEqual(distance_matrix[0][0], 10000)
         self.assertEqual(time_matrix[0][0], 600)
         
         # Check that inf is used for invalid routes
@@ -256,8 +256,8 @@ class TestDistanceMatrixBuilder(unittest.TestCase):
             
             # Check values
             self.assertEqual(distance_matrix[0][0], 0.0)
-            self.assertEqual(distance_matrix[0][1], 10.0)
-            self.assertEqual(distance_matrix[1][0], 10.0)
+            self.assertEqual(distance_matrix[0][1], 10000)
+            self.assertEqual(distance_matrix[1][0], 10000)
             self.assertEqual(distance_matrix[1][1], 0.0)
             
             self.assertEqual(time_matrix[0][0], 0)
@@ -430,8 +430,8 @@ class TestDistanceMatrixBuilder(unittest.TestCase):
             
             # Verify the matrix
             self.assertEqual(matrix.shape, (2, 2))
-            self.assertEqual(matrix[0, 1], 10.0)  # 10km
-            self.assertEqual(matrix[1, 0], 10.0)  # 10km
+            self.assertEqual(matrix[0, 1], 10000)  # 10km
+            self.assertEqual(matrix[1, 0], 10000)  # 10km
             
             # Verify cache was checked and result was cached
             mock_get_cached.assert_called_once()

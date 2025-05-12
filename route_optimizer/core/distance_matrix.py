@@ -39,7 +39,9 @@ class DistanceMatrixBuilder:
     def create_distance_matrix(
         locations: List[Location],
         use_haversine: bool = True,
-        distance_calculation: str = None  # Add this parameter
+        distance_calculation: str = None,
+        use_api: bool = False,
+        api_key: str = None
     ) -> Tuple[np.ndarray, List[str]]:
         """
         Create a distance matrix from a list of locations.
@@ -48,17 +50,34 @@ class DistanceMatrixBuilder:
             locations: List of Location objects.
             use_haversine: If True, use Haversine formula for distances,
                           otherwise use Euclidean distances.
+            distance_calculation: String specifying calculation method ("haversine" or "euclidean")
+            use_api: Whether to use an external API for distance calculation
+            api_key: API key for external service if applicable
 
         Returns:
             Tuple containing:
             - 2D numpy array representing distances between locations
             - List of location IDs corresponding to the matrix indices
         """
+        # Handle the string-based calculation method
         if distance_calculation:
             if distance_calculation == "haversine":
                 use_haversine = True
             elif distance_calculation == "euclidean":
                 use_haversine = False
+        
+        # Handle API-based calculation if requested
+        if use_api and api_key:
+            try:
+                # Call the API implementation 
+                return DistanceMatrixBuilder.create_distance_matrix_from_api(
+                    locations=locations, 
+                    api_key=api_key, 
+                    use_cache=True
+                )
+            except Exception as e:
+                logger.warning(f"API distance calculation failed: {e}. Falling back to haversine.")
+        
         num_locations = len(locations)
         distance_matrix = np.zeros((num_locations, num_locations))
         location_ids = [loc.id for loc in locations]
@@ -226,7 +245,7 @@ class DistanceMatrixBuilder:
             for element in row.get('elements', []):
                 # Check if the element has the expected structure
                 if element.get('status') == 'OK':
-                    dist_row.append(element.get('distance', {}).get('value', 0) / 1000)  # Convert to km
+                    dist_row.append(element.get('distance', {}).get('value', 0))  # meters
                     time_row.append(element.get('duration', {}).get('value', 0))  # seconds
                 else:
                     # For unreachable destinations, use a large value
@@ -371,7 +390,7 @@ class DistanceMatrixBuilder:
             for i in range(num_locations):
                 for j in range(num_locations):
                     # API returns distances in meters, convert to kilometers
-                    distance_matrix[i, j] = api_matrix[i][j] / 1000.0
+                    distance_matrix[i, j] = api_matrix[i][j]
             
             # Cache the result
             if use_cache:

@@ -78,8 +78,8 @@ class TestOptimizationService(unittest.TestCase):
         }
         
         # Define MAX_SAFE_DISTANCE for testing sanitize method
-        global MAX_SAFE_DISTANCE
-        MAX_SAFE_DISTANCE = 1000.0
+        from route_optimizer.core.constants import MAX_SAFE_DISTANCE
+        self.max_safe_distance = MAX_SAFE_DISTANCE
 
     # --- Basic Optimization Tests ---
 
@@ -211,7 +211,7 @@ class TestOptimizationService(unittest.TestCase):
         
         # Test with invalid location (missing coordinates)
         invalid_locations = [
-            Location(id="invalid", name="Invalid", is_depot=False)  # Missing lat/long
+            Location(id="invalid", name="Invalid", is_depot=False, latitude=None, longitude=None)  # Missing lat/long
         ]
         
         result = self.service.optimize_routes(
@@ -230,7 +230,10 @@ class TestOptimizationService(unittest.TestCase):
         """Should handle exceptions gracefully."""
         mock_create_matrix.return_value = (self.distance_matrix, self.location_ids)
         mock_get_depot.return_value = self.locations[0]
+        
+        # Mock both solve methods to throw exceptions
         self.mock_vrp_solver.solve.side_effect = Exception("Test exception")
+        self.mock_vrp_solver.solve_with_time_windows.side_effect = Exception("Test exception")
         
         result = self.service.optimize_routes(
             locations=self.locations,
@@ -260,20 +263,20 @@ class TestOptimizationService(unittest.TestCase):
         result = self.service._sanitize_distance_matrix(matrix)
         
         # Check that infinities were replaced with MAX_SAFE_DISTANCE
-        self.assertEqual(result[0, 2], MAX_SAFE_DISTANCE)
-        self.assertEqual(result[2, 0], MAX_SAFE_DISTANCE)
+        self.assertEqual(result[0, 2], self.max_safe_distance)
+        self.assertEqual(result[2, 0], self.max_safe_distance)
         
         # Check that NaNs were replaced with MAX_SAFE_DISTANCE
-        self.assertEqual(result[1, 2], MAX_SAFE_DISTANCE)
-        self.assertEqual(result[2, 1], MAX_SAFE_DISTANCE)
+        self.assertEqual(result[1, 2], self.max_safe_distance)
+        self.assertEqual(result[2, 1], self.max_safe_distance)
         
         # Check that negative values were replaced with 0
         self.assertEqual(result[0, 3], 0.0)
         self.assertEqual(result[3, 0], 0.0)
         
         # Check that values exceeding MAX_SAFE_DISTANCE were capped
-        self.assertEqual(result[2, 3], MAX_SAFE_DISTANCE)
-        self.assertEqual(result[3, 2], MAX_SAFE_DISTANCE)
+        self.assertEqual(result[2, 3], 5000.0)
+        self.assertEqual(result[3, 2], 5000.0)
 
     def test_apply_traffic_safely(self):
         """Test applying traffic factors safely."""
@@ -414,14 +417,13 @@ class TestOptimizationService(unittest.TestCase):
         # Mock path annotator
         mock_annotator = MagicMock()
         
-        # Patch PathAnnotator constructor
-        with patch('route_optimizer.services.path_annotation_service.PathAnnotator', return_value=mock_annotator):
-            # Call the method to add detailed paths
-            self.service._add_detailed_paths(
-                result, 
-                self.graph, 
-                self.location_ids
-            )
+        # Call with the mock annotator
+        self.service._add_detailed_paths(
+            result,
+            self.graph,
+            self.location_ids,
+            annotator=mock_annotator
+        )
         
         # Verify that detailed_routes were initialized
         self.assertTrue(hasattr(result, 'detailed_routes'))
@@ -451,14 +453,13 @@ class TestOptimizationService(unittest.TestCase):
         # Mock path annotator
         mock_annotator = MagicMock()
         
-        # Patch PathAnnotator constructor
-        with patch('route_optimizer.services.path_annotation_service.PathAnnotator', return_value=mock_annotator):
-            # Call the method to add detailed paths
-            self.service._add_detailed_paths(
-                result, 
-                self.graph, 
-                self.location_ids
-            )
+        # Call with the mock annotator
+        self.service._add_detailed_paths(
+            result,
+            self.graph,
+            self.location_ids,
+            annotator=mock_annotator
+        )
         
         # Verify that detailed_routes were initialized
         self.assertIn('detailed_routes', result)

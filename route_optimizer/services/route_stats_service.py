@@ -157,12 +157,14 @@ class RouteStatsService:
             # Add summary statistics
             if 'statistics' not in result:
                 result['statistics'] = {}
-                
-            result['statistics']['summary'] = {
+            
+            result['summary'] = {
                 'total_stops': total_stops,
                 'total_distance': total_distance,
                 'total_vehicles': len([r for r in result['detailed_routes'] if r.get('vehicle_id')]),
                 'total_cost': result['total_cost']
             }
+            
+            result['statistics']['summary'] = result['summary']
         
         return result
