@@ -18,33 +18,6 @@ from route_optimizer.models import Vehicle, Delivery
 # Set up logging
 logger = logging.getLogger(__name__)
 
-
-# @dataclass
-# class Vehicle:
-#     """Class representing a vehicle with capacity and other constraints."""
-#     id: str
-#     capacity: float
-#     start_location_id: str  # Where the vehicle starts from
-#     end_location_id: Optional[str] = None  # Where the vehicle must end (if different)
-#     cost_per_km: float = 1.0  # Cost per kilometer
-#     fixed_cost: float = 0.0   # Fixed cost for using this vehicle
-#     max_distance: Optional[float] = None  # Maximum distance the vehicle can travel
-#     max_stops: Optional[int] = None  # Maximum number of stops
-#     available: bool = True
-#     skills: List[str] = field(default_factory=list)  # Skills/capabilities this vehicle has
-
-
-# @dataclass
-# class Delivery:
-#     """Class representing a delivery with demand and constraints."""
-#     id: str
-#     location_id: str
-#     demand: float  # Demand quantity
-#     priority: int = 1  # 1 = normal, higher values = higher priority
-#     required_skills: List[str] = field(default_factory=list)  # Required skills
-#     is_pickup: bool = False  # True for pickup, False for delivery
-
-
 class ORToolsVRPSolver:
     """
     Vehicle Routing Problem solver using Google OR-Tools.
@@ -298,25 +271,6 @@ class ORToolsVRPSolver:
                 detailed_routes=[],
                 statistics={'error': 'No solution found!'}
             )
-        
-        # # Validate the result before returning
-        # try:
-        #     # Convert to dict for validation
-        #     result_dict = {
-        #         'status': result.status,
-        #         'routes': result.routes,
-        #         'total_distance': result.total_distance,
-        #         'assigned_vehicles': result.assigned_vehicles,
-        #         'unassigned_deliveries': result.unassigned_deliveries
-        #     }
-        #     validate_optimization_result(result_dict)
-        # except ValueError as e:
-        #     logger.error(f"Invalid optimization result: {e}")
-        #     return OptimizationResult(
-        #         status='failed',
-        #         total_cost=0.0,
-        #         statistics={'error': f"Validation error: {str(e)}"}
-        #     )
         
         return result
         

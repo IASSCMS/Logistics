@@ -14,7 +14,7 @@ import requests
 from datetime import datetime, timedelta
 from urllib.parse import quote
 
-from route_optimizer.core.constants import DISTANCE_SCALING_FACTOR, MAX_SAFE_DISTANCE
+from route_optimizer.core.constants import DISTANCE_SCALING_FACTOR, MAX_SAFE_DISTANCE, MAX_SAFE_TIME
 from route_optimizer.core.types_1 import Location
 from route_optimizer.models import DistanceMatrixCache
 
@@ -41,23 +41,26 @@ class DistanceMatrixBuilder:
         use_haversine: bool = True,
         distance_calculation: str = None,
         use_api: bool = False,
-        api_key: str = None
-    ) -> Tuple[np.ndarray, List[str]]:
+        api_key: str = None,
+        average_speed_kmh: Optional[float] = None # New parameter for time estimation
+    ) -> Tuple[np.ndarray, Optional[np.ndarray], List[str]]:
         """
-        Create a distance matrix from a list of locations.
+        Create distance and time matrices from a list of locations.
+        Time matrix might be None if not available (e.g., Haversine without speed) or estimated.
 
         Args:
             locations: List of Location objects.
-            use_haversine: If True, use Haversine formula for distances,
-                          otherwise use Euclidean distances.
-            distance_calculation: String specifying calculation method ("haversine" or "euclidean")
-            use_api: Whether to use an external API for distance calculation
-            api_key: API key for external service if applicable
+            use_haversine: If True, use Haversine formula for distances.
+            distance_calculation: String specifying calculation ("haversine" or "euclidean").
+            use_api: Whether to use an external API.
+            api_key: API key for external service.
+            average_speed_kmh: Average speed in km/h to estimate travel times for non-API cases.
 
         Returns:
             Tuple containing:
-            - 2D numpy array representing distances between locations
-            - List of location IDs corresponding to the matrix indices
+            - distance_matrix: 2D numpy array (distances in km).
+            - time_matrix: Optional 2D numpy array (times in minutes from API or estimation), or None.
+            - location_ids: List of location IDs.
         """
         # Handle the string-based calculation method
         if distance_calculation:
@@ -73,34 +76,57 @@ class DistanceMatrixBuilder:
                 return DistanceMatrixBuilder.create_distance_matrix_from_api(
                     locations=locations, 
                     api_key=api_key, 
-                    use_cache=True
+                    use_cache=True # Assuming use_cache is desired by default for API calls
                 )
             except Exception as e:
-                logger.warning(f"API distance calculation failed: {e}. Falling back to haversine.")
+                logger.warning(f"API distance calculation failed: {e}. Falling back to local calculation.")
         
+        # If not using API or API failed and fell back here:
         num_locations = len(locations)
-        distance_matrix = np.zeros((num_locations, num_locations))
+        if num_locations == 0:
+            return np.array([]).reshape(0,0), np.array([]).reshape(0,0), []
+
+        distance_matrix_km = np.zeros((num_locations, num_locations))
         location_ids = [loc.id for loc in locations]
         
         for i in range(num_locations):
             for j in range(num_locations):
                 if i == j:
-                    continue  # Zero distance to self
+                    continue
                 
                 if use_haversine:
                     distance = DistanceMatrixBuilder._haversine_distance(
                         locations[i].latitude, locations[i].longitude,
                         locations[j].latitude, locations[j].longitude
                     )
-                else:
+                else: # Euclidean
                     distance = DistanceMatrixBuilder._euclidean_distance(
                         locations[i].latitude, locations[i].longitude,
                         locations[j].latitude, locations[j].longitude
                     )
-                
-                distance_matrix[i, j] = distance
+                distance_matrix_km[i, j] = distance
         
-        return distance_matrix, location_ids
+        # For non-API path, estimate time_matrix if average_speed_kmh is provided
+        time_matrix_estimated_min: Optional[np.ndarray] = None
+        if average_speed_kmh and average_speed_kmh > 0:
+            # Time (hours) = Distance (km) / Speed (km/h)
+            # Time (minutes) = Time (hours) * 60
+            # Avoid division by zero if distance is zero (e.g. i==j, though we skip this)
+            # For i != j, distance_matrix_km[i,j] could be 0 if locations are identical
+            
+            # Create a copy to avoid modifying distance_matrix_km if it's used elsewhere for raw distances
+            time_matrix_estimated_min = np.zeros_like(distance_matrix_km)
+            non_zero_distances = distance_matrix_km > 0
+            time_matrix_estimated_min[non_zero_distances] = \
+                (distance_matrix_km[non_zero_distances] / average_speed_kmh) * 60.0
+            
+            # Ensure diagonal is zero
+            np.fill_diagonal(time_matrix_estimated_min, 0)
+        else:
+            if not use_api: # Only log warning if we are in the non-API path and couldn't estimate
+                logger.info("Average speed not provided or invalid for non-API time matrix estimation. Time matrix will be None.")
+        
+        return distance_matrix_km, time_matrix_estimated_min, location_ids
 
     @staticmethod
     def distance_matrix_to_graph(
@@ -184,81 +210,90 @@ class DistanceMatrixBuilder:
     @staticmethod
     def add_traffic_factors(
         distance_matrix: np.ndarray,
-        traffic_factors: Dict[Tuple[int, int], float]
+        traffic_data: Dict[Tuple[int, int], float]
     ) -> np.ndarray:
         """
-        Apply traffic factors to a distance matrix.
+        Apply traffic factors to a distance matrix with bounds checking.
 
         Args:
-            distance_matrix: Original distance matrix
-            traffic_factors: Dictionary mapping (i,j) tuples to traffic factors.
-                            A factor of 1.0 means no change, >1.0 means slower.
+            distance_matrix: Original distance matrix (assumed to be in km)
+            traffic_factors: Dictionary mapping (from_idx, to_idx) to traffic factors.
+                          A factor of 1.0 means no change, >1.0 means slower.
+                          Factors < 1.0 will be treated as 1.0.
 
         Returns:
             Updated distance matrix with traffic factors applied
         """
-        matrix_with_traffic = distance_matrix.copy()
-        
-        for (i, j), factor in traffic_factors.items():
-            matrix_with_traffic[i, j] *= factor
+        if not traffic_data: # If no traffic data, return original matrix
+            return distance_matrix
             
+        matrix_with_traffic = np.array(distance_matrix, dtype=float)
+        rows, cols = matrix_with_traffic.shape
+        
+        # Define maximum safe factor to prevent overflow/extreme alteration
+        max_safe_factor = 5.0  # This could be a constant from settings.py if configurable
+        
+        for (from_idx, to_idx), factor in traffic_data.items():
+            if 0 <= from_idx < rows and 0 <= to_idx < cols:
+                # Validate factor (ensure it's positive and cap it)
+                # Treat factors < 1.0 as 1.0 (no speed-up, only slow-down or no change)
+                safe_factor = min(max(float(factor), 1.0), max_safe_factor)
+                
+                matrix_with_traffic[from_idx, to_idx] *= safe_factor
+                
+                if safe_factor != factor:
+                    logger.warning(
+                        f"Traffic factor {factor} for route ({from_idx},{to_idx}) was adjusted to {safe_factor}."
+                    )
+            else:
+                logger.warning(
+                    f"Invalid indices ({from_idx},{to_idx}) in traffic_data. Max_idx: ({rows-1},{cols-1}). Skipping."
+                )
         return matrix_with_traffic
-    
-    @staticmethod
-    def _send_request(origin_addresses, dest_addresses, api_key):
-        """Builds and sends request for the given origin and destination addresses."""
-        def build_address_str(addresses):
-            # Build a pipe-separated string of addresses
-            return '|'.join(addresses)
-
-        import requests
-        import json
-        
-        request = 'https://maps.googleapis.com/maps/api/distancematrix/json?units=metric'
-        origin_address_str = build_address_str(origin_addresses)
-        dest_address_str = build_address_str(dest_addresses)
-        request = (request + '&origins=' + origin_address_str + 
-                '&destinations=' + dest_address_str + '&key=' + api_key)
-        
-        response = requests.get(request)
-        return json.loads(response.text)
 
     @staticmethod
     def _process_api_response(response: Dict[str, Any]) -> Tuple[List[List[float]], List[List[float]]]:
         """
-        Process the Google Maps Distance Matrix API response into distance and time matrices.
-        
-        Args:
-            response: The response from the Google Maps API
-            
-        Returns:
-            Tuple containing (distance_matrix, time_matrix)
-            Both matrices are in meters and seconds respectively
-        """
-        distance_matrix = []
-        time_matrix = []
-        
-        for row in response.get('rows', []):
-            dist_row = []
-            time_row = []
-            
-            for element in row.get('elements', []):
-                # Check if the element has the expected structure
-                if element.get('status') == 'OK':
-                    dist_row.append(element.get('distance', {}).get('value', 0))  # meters
-                    time_row.append(element.get('duration', {}).get('value', 0))  # seconds
-                else:
-                    # For unreachable destinations, use a large value
-                    logger.warning(f"Destination unreachable: {element.get('status')}")
-                    dist_row.append(float('inf'))
-                    time_row.append(float('inf'))
-            
-            distance_matrix.append(dist_row)
-            time_matrix.append(time_row)
-        
-        return distance_matrix, time_matrix
+        Process the Google Maps Distance Matrix API response.
+        Converts distances to kilometers and times to minutes.
 
-    def _sanitize_distance_matrix(self, matrix):
+        Args:
+            response: The response from the Google Maps API.
+
+        Returns:
+            Tuple containing (distance_matrix_km, time_matrix_min).
+            Distances are in kilometers, times are in minutes.
+        """
+        distance_matrix_km = []
+        time_matrix_min = []
+
+        for row in response.get('rows', []):
+            dist_row_km = []
+            time_row_min = []
+
+            for element in row.get('elements', []):
+                if element.get('status') == 'OK':
+                    dist_val_meters = element.get('distance', {}).get('value', 0)
+                    time_val_seconds = element.get('duration', {}).get('value', 0)
+
+                    dist_row_km.append(dist_val_meters / 1000.0)  # Convert meters to kilometers
+                    time_row_min.append(time_val_seconds / 60.0)  # Convert seconds to minutes
+                else:
+                    # For unreachable destinations or errors, use defined safe maximum values
+                    status_msg = element.get('status', 'UNKNOWN_ERROR')
+                    logger.warning(
+                        f"API element status not OK: '{status_msg}'. Using MAX_SAFE_DISTANCE and MAX_SAFE_TIME."
+                    )
+                    dist_row_km.append(MAX_SAFE_DISTANCE)  # MAX_SAFE_DISTANCE is in km
+                    time_row_min.append(MAX_SAFE_TIME)     # MAX_SAFE_TIME should be in minutes
+            
+            distance_matrix_km.append(dist_row_km)
+            time_matrix_min.append(time_row_min)
+        
+        return distance_matrix_km, time_matrix_min
+
+    @staticmethod
+    def _sanitize_distance_matrix(matrix: Optional[np.ndarray]) -> np.ndarray:
         """
         Sanitize distance matrix by replacing infinite or extreme values.
         
@@ -275,7 +310,7 @@ class DistanceMatrixBuilder:
         sanitized = np.array(matrix, dtype=float)
         
         # Define the maximum safe distance value
-        max_safe_value = MAX_SAFE_DISTANCE  # This should be defined in your constants
+        max_safe_value = MAX_SAFE_DISTANCE  # This should be defined in constants
         
         # Replace any NaN values with a large but valid distance
         sanitized = np.nan_to_num(sanitized, nan=max_safe_value)
@@ -296,7 +331,7 @@ class DistanceMatrixBuilder:
         Apply traffic factors to distance matrix with bounds checking.
         
         Args:
-            distance_matrix: Original distance matrix
+            distance_matrix: Original distance matrix (in km)
             traffic_data: Dictionary mapping (from_idx, to_idx) to traffic factors
             
         Returns:
@@ -337,86 +372,79 @@ class DistanceMatrixBuilder:
 
     @staticmethod
     def create_distance_matrix_from_api(
-        locations: List[Location], 
+        locations: List[Location],
         api_key: Optional[str] = None,
         use_cache: bool = True
-    ) -> Tuple[np.ndarray, List[str]]:
+    ) -> Tuple[np.ndarray, np.ndarray, List[str]]: # Updated type hint
         """
-        Create a distance matrix from a list of locations using Google Distance Matrix API.
-        Falls back to Haversine calculation if API fails.
-        
+        Create distance and time matrices from a list of locations using Google Distance Matrix API.
+        Falls back to Haversine calculation for distances and a placeholder for times if API fails.
+        Distances are in kilometers, and times are in minutes.
+
         Args:
             locations: List of Location objects.
             api_key: Google API key with Distance Matrix API enabled.
             use_cache: Whether to use cached results.
-            
+
         Returns:
             Tuple containing:
-            - 2D numpy array representing distances between locations in km
-            - List of location IDs corresponding to the matrix indices
+            - distance_matrix_km_np: 2D numpy array (distances in km).
+            - time_matrix_min_np: 2D numpy array (times in minutes).
+            - location_ids: List of location IDs corresponding to matrix indices.
         """
-        # Use provided API key or fall back to settings
-        api_key = api_key or GOOGLE_MAPS_API_KEY
-        
-        if not api_key:
-            logger.warning("No Google Maps API key provided. Falling back to Haversine distance.")
-            return DistanceMatrixBuilder.create_distance_matrix(locations, use_haversine=True)
-        
+        # Use provided API key or fall back to settings (ensure GOOGLE_MAPS_API_KEY is accessible)
+        # from route_optimizer.settings import GOOGLE_MAPS_API_KEY # Example import
+        resolved_api_key = api_key or GOOGLE_MAPS_API_KEY # Make sure GOOGLE_MAPS_API_KEY is defined/imported
+
+        if not resolved_api_key:
+            logger.warning("No Google Maps API key. Falling back to Haversine for distance, zeros for time.")
+            dist_matrix_fallback_km, time_matrix_fallback_min, loc_ids_fallback = DistanceMatrixBuilder.create_distance_matrix(
+                                                                locations, use_haversine=True
+                                                            )
+            return dist_matrix_fallback_km, time_matrix_fallback_min, loc_ids_fallback
+
         try:
-            # Try to get from cache first if use_cache is True
+            location_ids = [str(loc.id) for loc in locations] # Ensure IDs are strings
+
             if use_cache:
+                # get_cached_matrix expects List[Location]
                 cached_result = DistanceMatrixBuilder.get_cached_matrix(locations)
                 if cached_result:
-                    logger.info("Using cached distance matrix")
-                    return cached_result
+                    # Assuming get_cached_matrix returns (dist_km_np, time_min_np, ids_from_cache)
+                    logger.info("Using cached distance and time matrix (km, minutes).")
+                    return cached_result[0], cached_result[1], cached_result[2]
             
-            # Extract addresses from locations
-            addresses = []
-            location_ids = []
-            for loc in locations:
-                address = DistanceMatrixBuilder._format_address(loc)
-                addresses.append(address)
-                location_ids.append(str(loc.id))  # Convert to string for consistency
+            # Use the updated _format_address which returns "lat,lon"
+            addresses = [DistanceMatrixBuilder._format_address(loc) for loc in locations]
             
-            # Prepare data for the API
-            data = {"addresses": addresses, "API_key": api_key}
+            data_for_api = {"addresses": addresses, "API_key": resolved_api_key}
             
-            # Get the matrices from Google API
-            api_matrix, time_matrix = DistanceMatrixBuilder._fetch_distance_and_time_matrices(data)
+            # _fetch_distance_and_time_matrices calls _process_api_response,
+            # which now returns distances in km and times in minutes.
+            api_dist_km_list, api_time_min_list = DistanceMatrixBuilder._fetch_distance_and_time_matrices(data_for_api)
             
-            # Convert to numpy array (and convert from meters to kilometers)
-            num_locations = len(locations)
-            distance_matrix = np.zeros((num_locations, num_locations))
+            # Convert lists to numpy arrays
+            distance_matrix_km_np = np.array(api_dist_km_list, dtype=float)
+            time_matrix_min_np = np.array(api_time_min_list, dtype=float)
             
-            time_matrix_np = np.array(time_matrix)
-            
-            # Cache the result
             if use_cache:
-                DistanceMatrixBuilder.cache_matrix(distance_matrix, location_ids, time_matrix)
+                # Cache the matrices (now correctly in km and minutes)
+                DistanceMatrixBuilder.cache_matrix(distance_matrix_km_np, location_ids, time_matrix_min_np)
                 
-            return distance_matrix, time_matrix_np, location_ids
+            return distance_matrix_km_np, time_matrix_min_np, location_ids
             
         except Exception as e:
-            logger.error(f"Error creating distance matrix from API: {str(e)}")
-            logger.info("Falling back to Haversine distance calculation")
-            return DistanceMatrixBuilder.create_distance_matrix(locations, use_haversine=True)
+            logger.error(f"Error creating distance and time matrix from API: {e}", exc_info=True)
+            logger.info("Falling back to Haversine for distance, placeholder (zeros) for time.")
+            dist_matrix_fallback_km, time_matrix_fallback_min, loc_ids_fallback = DistanceMatrixBuilder.create_distance_matrix(
+                                                                locations, use_haversine=True
+                                                            )
+            return dist_matrix_fallback_km, time_matrix_fallback_min, loc_ids_fallback
     
     @staticmethod
     def _format_address(location: Location) -> str:
-        """Format location address for API request."""
-        components = []
-        if hasattr(location, 'street_address') and location.street_address:
-            components.append(location.street_address)
-        if hasattr(location, 'city') and location.city:
-            components.append(location.city)
-        if hasattr(location, 'state') and location.state:
-            components.append(location.state)
-        if hasattr(location, 'zip_code') and location.zip_code:
-            components.append(location.zip_code)
-        
-        # Join and encode address components
-        address = ' '.join(components)
-        return address.replace(' ', '+')
+        """Format location as 'latitude,longitude' string for API request."""
+        return f"{location.latitude},{location.longitude}"
     
     @staticmethod
     def _fetch_distance_and_time_matrices(data: Dict[str, Any]) -> Tuple[List[List[float]], List[List[float]]]:
@@ -513,32 +541,6 @@ class DistanceMatrixBuilder:
         
         response = requests.get(request, timeout=10)  # 10-second timeout
         return response.json()
-
-    @staticmethod
-    def _build_distance_and_time_matrices(response):
-        """Builds distance and time matrices from API response."""
-        distance_matrix = []
-        time_matrix = []
-        
-        for row in response.get('rows', []):
-            dist_row = []
-            time_row = []
-            
-            for element in row.get('elements', []):
-                # Check if the element has the expected structure
-                if element.get('status') == 'OK':
-                    dist_row.append(element.get('distance', {}).get('value', 0))  # meters
-                    time_row.append(element.get('duration', {}).get('value', 0))  # seconds
-                else:
-                    # For unreachable destinations, use a large value
-                    logger.warning(f"Destination unreachable: {element.get('status')}")
-                    dist_row.append(float('inf'))
-                    time_row.append(float('inf'))
-                    
-            distance_matrix.append(dist_row)
-            time_matrix.append(time_row)
-            
-        return distance_matrix, time_matrix
     
     @staticmethod
     def get_cached_matrix(locations, cache_expiry_days=None):

@@ -1,6 +1,7 @@
 import logging 
 from math import radians, cos, sin, asin, sqrt
-from typing import Any, Dict, List 
+from typing import Any, Dict, List, Tuple
+import numpy as np
 
 from route_optimizer.core.constants import MAX_SAFE_DISTANCE
 from route_optimizer.core.distance_matrix import DistanceMatrixBuilder
@@ -19,7 +20,11 @@ class TrafficService:
         self.api_key = api_key
     
     @staticmethod
-    def apply_traffic_factors(distance_matrix, traffic_data):
+    def apply_traffic_factors(
+        distance_matrix: np.ndarray,
+        traffic_data: Dict[Tuple[int, int], float]
+    ) -> np.ndarray:
+        # Calls the robust, consolidated method in DistanceMatrixBuilder
         return DistanceMatrixBuilder.add_traffic_factors(distance_matrix, traffic_data)
 
     def _calculate_distance_haversine(self, loc1: Location, loc2: Location) -> float:
@@ -32,7 +37,7 @@ class TrafficService:
             # Assuming _haversine_distance in DistanceMatrixBuilder is static or accessible
             return DistanceMatrixBuilder._haversine_distance(loc1.latitude, loc1.longitude, loc2.latitude, loc2.longitude)
         logger.warning(f"Could not calculate Haversine distance between {loc1.id} and {loc2.id} due to missing coordinates.")
-        return float(MAX_SAFE_DISTANCE) # Or float('inf')
+        return float('inf')
     
     def create_road_graph(self, locations: List[Location]) -> Dict[str, Any]:
         """

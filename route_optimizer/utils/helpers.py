@@ -71,8 +71,8 @@ def apply_external_factors(
     Apply external factors like traffic or weather to distance and time matrices.
     
     Args:
-        distance_matrix: Original distance matrix.
-        time_matrix: Original time matrix.
+        distance_matrix: Original distance matrix(in km).
+        time_matrix: Original time matrix(in minutes).
         external_factors: Dictionary mapping (i,j) tuples to factors.
                          A factor of 1.0 means no change, >1.0 means slower.
         

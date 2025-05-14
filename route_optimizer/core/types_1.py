@@ -3,6 +3,9 @@ Core data types for the route optimizer.
 """
 from dataclasses import dataclass, field
 from typing import Dict, List, Tuple, Optional, Any
+import logging # Add logging import
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class Location:
@@ -32,11 +35,55 @@ class OptimizationResult:
     status: str
     routes: List[List[str]] = field(default_factory=list)
     total_distance: float = 0.0
-    total_cost: float = 0.0
+    total_cost: float = 0.0 # This will be populated by RouteStatsService or solver
     assigned_vehicles: Dict[str, int] = field(default_factory=dict)
     unassigned_deliveries: List[str] = field(default_factory=list)
-    detailed_routes: List[Dict[str, Any]] = field(default_factory=list)
+    detailed_routes: List[Dict[str, Any]] = field(default_factory=list) # List of dicts as per current DTO
     statistics: Dict[str, Any] = field(default_factory=dict)
+
+    @staticmethod
+    def from_dict(data: Optional[Dict[str, Any]]) -> 'OptimizationResult': # Use forward reference for return type
+        """
+        Creates an OptimizationResult instance from a dictionary.
+        Handles None input and provides default values for missing keys.
+        """
+        if data is None:
+            logger.warning("Attempted to create OptimizationResult from None data.")
+            return OptimizationResult(
+                status='error',
+                routes=[],
+                total_distance=0.0,
+                total_cost=0.0,
+                assigned_vehicles={},
+                unassigned_deliveries=[],
+                detailed_routes=[],
+                statistics={'error': 'Input data for OptimizationResult was None'}
+            )
+        
+        try:
+            # Ensure all fields have defaults if not present in the dict
+            return OptimizationResult(
+                status=data.get('status', 'unknown'),
+                routes=data.get('routes', []),
+                total_distance=data.get('total_distance', 0.0),
+                total_cost=data.get('total_cost', 0.0),
+                assigned_vehicles=data.get('assigned_vehicles', {}),
+                unassigned_deliveries=data.get('unassigned_deliveries', []),
+                detailed_routes=data.get('detailed_routes', []),
+                statistics=data.get('statistics', {})
+            )
+        except Exception as e: # Catch any unexpected error during attribute access or .get if data is not a dict
+            logger.error(f"Failed to convert dictionary to OptimizationResult: {e}", exc_info=True)
+            return OptimizationResult(
+                status='error',
+                routes=[],
+                total_distance=0.0,
+                total_cost=0.0,
+                assigned_vehicles={},
+                unassigned_deliveries=[], # Or attempt to get from data if possible
+                detailed_routes=[],
+                statistics={'error': f"Conversion error from dict: {str(e)}"}
+            )
 
 @dataclass
 class RouteSegment:
