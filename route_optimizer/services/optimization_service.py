@@ -30,16 +30,6 @@ class OptimizationService:
         self.vrp_solver = vrp_solver or ORToolsVRPSolver(time_limit_seconds)
         self.path_finder = path_finder or DijkstraPathFinder()
 
-    def _create_pathfinder(self):
-        """
-        Create a path finder instance.
-        
-        Returns:
-            A path finder instance
-        """
-        from route_optimizer.core.dijkstra import DijkstraPathFinder
-        return DijkstraPathFinder()
-
     def _add_summary_statistics(self, result, vehicles):
         """
         Add summary statistics to the optimization result.
@@ -508,72 +498,3 @@ class OptimizationService:
                 detailed_routes=[],
                 statistics={'error': str(e)}
             )
-            
-            # # Ensure result is properly structured
-            # if isinstance(result, dict) and not isinstance(result, OptimizationResult):
-            #     # If result is still a dict, convert to OptimizationResult
-            #     try:
-            #         result = OptimizationResult(
-            #             status=result.get('status', 'unknown'),
-            #             routes=result.get('routes', []),
-            #             total_distance=result.get('total_distance', 0.0),
-            #             total_cost=result.get('total_cost', 0.0),
-            #             assigned_vehicles=result.get('assigned_vehicles', {}),
-            #             unassigned_deliveries=result.get('unassigned_deliveries', []),
-            #             detailed_routes=result.get('detailed_routes', []),
-            #             statistics=result.get('statistics', {})
-            #         )
-            #     except Exception as e:
-            #         logger.warning(f"Failed to convert dict to OptimizationResult: {e}")
-            
-            # # Validate the result
-            # if isinstance(result, OptimizationResult):
-            #     validate_optimization_result(result)
-            
-            # # Add statistics if they don't exist
-            # if isinstance(result, OptimizationResult) and not result.statistics:
-            #     result.statistics = {}
-            #     self.route_stats_service.add_statistics(result, vehicles)
-            # elif isinstance(result, dict) and 'statistics' not in result:
-            #     result['statistics'] = {}
-            #     self.route_stats_service.add_statistics(result, vehicles)
-            
-
-# class OptimizationService:
-    # def __init__(self, time_limit_seconds=30):
-    #     self.vrp_solver = ORToolsVRPSolver(time_limit_seconds)
-    #     self.path_finder = DijkstraPathFinder()
-
-    # def optimize_routes(self, locations, vehicles, deliveries, consider_traffic=False, consider_time_windows=False, traffic_data=None):
-    #     distance_matrix, location_ids = DistanceMatrixBuilder.create_distance_matrix(locations, use_haversine=True)
-
-    #     if consider_traffic and traffic_data:
-    #         distance_matrix = TrafficService.apply_traffic_factors(distance_matrix, traffic_data)
-
-    #     depot_index = DepotService.find_depot_index(locations)
-
-    #     if consider_time_windows:
-    #         result = self.vrp_solver.solve_with_time_windows(
-    #             distance_matrix=distance_matrix,
-    #             location_ids=location_ids,
-    #             vehicles=vehicles,
-    #             deliveries=deliveries,
-    #             locations=locations,
-    #             depot_index=depot_index
-    #         )
-    #     else:
-    #         result = self.vrp_solver.solve(
-    #             distance_matrix=distance_matrix,
-    #             location_ids=location_ids,
-    #             vehicles=vehicles,
-    #             deliveries=deliveries,
-    #             depot_index=depot_index
-    #         )
-
-    #     if result['status'] == 'success':
-    #         graph = DistanceMatrixBuilder.distance_matrix_to_graph(distance_matrix, location_ids)
-    #         annotator = PathAnnotator(self.path_finder)
-    #         annotator.annotate(result, graph)
-    #         RouteStatsService.add_statistics(result, vehicles)
-
-    #     return result

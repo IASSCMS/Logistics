@@ -387,16 +387,14 @@ class DistanceMatrixBuilder:
             # Convert to numpy array (and convert from meters to kilometers)
             num_locations = len(locations)
             distance_matrix = np.zeros((num_locations, num_locations))
-            for i in range(num_locations):
-                for j in range(num_locations):
-                    # API returns distances in meters, convert to kilometers
-                    distance_matrix[i, j] = api_matrix[i][j]
+            
+            time_matrix_np = np.array(time_matrix)
             
             # Cache the result
             if use_cache:
                 DistanceMatrixBuilder.cache_matrix(distance_matrix, location_ids, time_matrix)
                 
-            return distance_matrix, location_ids
+            return distance_matrix, time_matrix_np, location_ids
             
         except Exception as e:
             logger.error(f"Error creating distance matrix from API: {str(e)}")
@@ -564,7 +562,10 @@ class DistanceMatrixBuilder:
             if cached_result:
                 distance_matrix = np.array(json.loads(cached_result.matrix_data))
                 location_ids = json.loads(cached_result.location_ids)
-                return distance_matrix, location_ids
+                time_matrix = None
+                if cached_result.time_matrix_data:
+                    time_matrix = np.array(json.loads(cached_result.time_matrix_data))
+                return distance_matrix, time_matrix, location_ids
         except (models.ObjectDoesNotExist, Exception) as e:
             logger.warning(f"Error retrieving from cache: {str(e)}")
             

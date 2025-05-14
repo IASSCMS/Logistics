@@ -1,5 +1,3 @@
-# M:\Documents\B-Airways\Logistics\route_optimizer\tests\test_settings.py
-
 import os
 from pathlib import Path
 

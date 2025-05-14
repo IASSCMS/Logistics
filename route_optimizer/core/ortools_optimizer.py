@@ -233,7 +233,7 @@ class ORToolsVRPSolver:
         search_parameters.local_search_metaheuristic = (
             routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
         )
-        search_parameters.time_limit.seconds = 30  # Time limit for search
+        search_parameters.time_limit.seconds = self.time_limit_seconds # Use the instance variable
         
         # Solve the problem
         solution = routing.SolveWithParameters(search_parameters)
@@ -326,15 +326,15 @@ class ORToolsVRPSolver:
         location_ids: List[str],
         vehicles: List[Vehicle],
         deliveries: List[Delivery],
-        locations: List[Location],
+        locations: List[Location], # Note: Ensure this 'locations' list is the one with Location objects
         depot_index: int = 0,
         speed_km_per_hour: float = 50.0
-    ) -> Dict[str, Any]:
+    ) -> OptimizationResult: # CHANGED return type
         """
         Solve the Vehicle Routing Problem with Time Windows.
 
         Returns:
-            Dictionary containing the solution details with route time information.
+            OptimizationResult object containing the solution details. # CHANGED docstring
         """
         num_locations = len(location_ids)
         num_vehicles = len(vehicles)
@@ -392,35 +392,49 @@ class ORToolsVRPSolver:
         transit_callback_index = routing.RegisterTransitCallback(distance_callback)
         routing.SetArcCostEvaluatorOfAllVehicles(transit_callback_index)
 
-        # Time callback
         def time_callback(from_index, to_index):
-            """Returns the travel time between the two nodes."""
+            """Returns the total scaled travel time (travel + service) between the two nodes in seconds."""
             try:
                 from_node = manager.IndexToNode(from_index)
                 to_node = manager.IndexToNode(to_index)
-                
-                # Get the raw distance value
+
+                # 1. Calculate travel time in minutes
                 distance_km = distance_matrix[from_node][to_node]
-                
-                # Check for valid distance
+                    
+                # Handle invalid distances
                 if np.isinf(distance_km) or np.isnan(distance_km):
-                    distance_km = MAX_SAFE_DISTANCE
-                
-                # Calculate travel time in minutes
-                travel_minutes = (min(distance_km, MAX_SAFE_DISTANCE) / speed_km_per_hour) * 60
-                
-                # Add service time for the destination location
-                to_loc = location_index_to_location.get(to_node)
-                service_time = to_loc.service_time if to_loc else 0
-                
-                # Total time in seconds
-                total_time_seconds = (travel_minutes + service_time) * TIME_SCALING_FACTOR
-                
-                # Return scaled time
-                logger.debug(f"Travel time from {from_node} to {to_node}: {travel_minutes} min, service time: {service_time} min")
-                return int(total_time_seconds)
+                    logger.warning(f"Invalid distance for time_callback from {from_node} to {to_node}. Using MAX_SAFE_DISTANCE.")
+                    distance_km = MAX_SAFE_DISTANCE 
+                    
+                # Ensure distance_km is capped if it's excessively large but valid number
+                safe_distance_km = min(distance_km, MAX_SAFE_DISTANCE)
+                travel_minutes = (safe_distance_km / speed_km_per_hour) * 60
+
+                # 2. Get service time for the destination node (to_node) in minutes
+                to_loc_object = location_index_to_location.get(to_node)
+                service_time_minutes = 0
+                if to_loc_object and hasattr(to_loc_object, 'service_time') and to_loc_object.service_time is not None:
+                    service_time_minutes = to_loc_object.service_time
+                else:
+                    # Depot or location without service time
+                    pass
+
+                # 3. Total time in minutes
+                total_minutes = travel_minutes + service_time_minutes
+                    
+                # 4. Scale total time to seconds using TIME_SCALING_FACTOR
+                # TIME_SCALING_FACTOR = 60 (converts minutes to seconds)
+                total_time_seconds_scaled = int(total_minutes * TIME_SCALING_FACTOR)
+                    
+                # Ensure the returned value is within a safe bound for OR-Tools (e.g., related to MAX_SAFE_TIME)
+                # MAX_SAFE_TIME from constants is in minutes.
+                max_solver_time = int(MAX_SAFE_TIME * TIME_SCALING_FACTOR) # Max safe time in scaled seconds
+
+                return min(total_time_seconds_scaled, max_solver_time)
+
             except Exception as e:
-                logger.error(f"Error in time callback: {str(e)}")
+                logger.error(f"Error in time_callback from {from_index} to {to_index}: {str(e)}", exc_info=True)
+                # Fallback to a large, scaled time value (MAX_SAFE_TIME in minutes, scaled to seconds)
                 return int(MAX_SAFE_TIME * TIME_SCALING_FACTOR)
 
         time_callback_index = routing.RegisterTransitCallback(time_callback)
@@ -486,49 +500,110 @@ class ORToolsVRPSolver:
         solution = routing.SolveWithParameters(search_parameters)
 
         if solution:
-            routes = []
-            assigned_vehicles = {}
-            total_distance = 0
-            delivery_locations = set()
+            processed_routes = [] # Will store lists of location IDs
+            detailed_routes_data = [] # Will store list of dicts for DetailedRoute
+            assigned_vehicles_map = {}
+            total_distance_val = 0.0
+            all_visited_location_ids = set() # To find unassigned deliveries
 
             for vehicle_idx in range(num_vehicles):
-                route = []
+                route_stops_ids = []
+                route_detailed_stops = [] # For arrival times
                 index = routing.Start(vehicle_idx)
+                
+                current_route_distance = 0
+                
                 while not routing.IsEnd(index):
-                    node_index = manager.IndexToNode(index)
+                    node_idx = manager.IndexToNode(index)
+                    loc_id = location_ids[node_idx]
+                    route_stops_ids.append(loc_id)
+                    all_visited_location_ids.add(loc_id)
+
                     time_var = time_dimension.CumulVar(index)
-                    time_val = solution.Min(time_var)
-                    route.append({
-                        'location_id': location_ids[node_index],
-                        'arrival_time_seconds': time_val
+                    arrival_time_seconds = solution.Min(time_var)
+                    route_detailed_stops.append({
+                        'location_id': loc_id,
+                        'arrival_time_seconds': arrival_time_seconds 
+                        # You might want to convert arrival_time_seconds to minutes 
+                        # if OptimizationResult expects that for its stats/detailed_routes
                     })
-                    delivery_locations.add(location_ids[node_index])
-                    prev_index = index
+                    
+                    previous_index = index
                     index = solution.Value(routing.NextVar(index))
-                    total_distance += routing.GetArcCostForVehicle(prev_index, index, vehicle_idx) / DISTANCE_SCALING_FACTOR
-                node_index = manager.IndexToNode(index)
-                time_val = solution.Min(time_dimension.CumulVar(index))
-                route.append({
-                    'location_id': location_ids[node_index],
-                    'arrival_time_seconds': time_val
+                    current_route_distance += routing.GetArcCostForVehicle(previous_index, index, vehicle_idx)
+
+                # Add the end location
+                node_idx = manager.IndexToNode(index)
+                loc_id_end = location_ids[node_idx]
+                route_stops_ids.append(loc_id_end)
+                all_visited_location_ids.add(loc_id_end) # Though end depot might not be a delivery loc
+                
+                time_var_end = time_dimension.CumulVar(index)
+                arrival_time_seconds_end = solution.Min(time_var_end)
+                route_detailed_stops.append({
+                    'location_id': loc_id_end,
+                    'arrival_time_seconds': arrival_time_seconds_end
                 })
-                if route:
-                    routes.append(route)
-                    assigned_vehicles[vehicles[vehicle_idx].id] = len(routes) - 1
 
-            unassigned_deliveries = [
-                d.id for d in deliveries if d.location_id not in delivery_locations
+                # Only add non-empty routes (routes that visit more than just start/end depot if they are the same)
+                # Or if start and end are different, a route with just two stops is valid.
+                # A simple check: if it has intermediate stops or if start != end.
+                is_meaningful_route = False
+                if len(route_stops_ids) > 2: # Depot -> Stop -> Depot
+                    is_meaningful_route = True
+                elif len(route_stops_ids) == 2 and route_stops_ids[0] != route_stops_ids[1]: # DepotA -> DepotB
+                     is_meaningful_route = True
+                elif not deliveries: # If no deliveries, depot-to-depot is fine
+                    is_meaningful_route = True
+
+
+                if is_meaningful_route:
+                    processed_routes.append(route_stops_ids)
+                    route_total_distance = current_route_distance / DISTANCE_SCALING_FACTOR
+                    total_distance_val += route_total_distance
+                    
+                    assigned_vehicles_map[vehicles[vehicle_idx].id] = len(processed_routes) - 1
+                    
+                    # Store arrival times per location for this route
+                    estimated_arrival_times_dict = {
+                        stop_info['location_id']: stop_info['arrival_time_seconds'] 
+                        for stop_info in route_detailed_stops
+                    }
+
+                    detailed_routes_data.append({
+                        "vehicle_id": vehicles[vehicle_idx].id,
+                        "stops": route_stops_ids, # list of location_ids
+                        "segments": [], # To be populated by PathAnnotator
+                        "total_distance": route_total_distance,
+                        "total_time": 0, # To be calculated or estimated later
+                        "capacity_utilization": 0, # To be calculated later
+                        "estimated_arrival_times": estimated_arrival_times_dict
+                    })
+
+            unassigned_deliveries_ids = [
+                d.id for d in deliveries if d.location_id not in all_visited_location_ids
             ]
-
-            return {
-                'status': 'success',
-                'routes': routes,
-                'total_distance': total_distance,
-                'assigned_vehicles': assigned_vehicles,
-                'unassigned_deliveries': unassigned_deliveries
-            }
+            
+            # The 'statistics' field can hold any extra info like raw arrival times if needed
+            # For now, we'll put the arrival times per route directly into detailed_routes.
+            return OptimizationResult(
+                status='success',
+                routes=processed_routes,
+                total_distance=total_distance_val,
+                total_cost=0.0,  # To be calculated by RouteStatsService
+                assigned_vehicles=assigned_vehicles_map,
+                unassigned_deliveries=unassigned_deliveries_ids,
+                detailed_routes=detailed_routes_data, # Pass structured detailed routes
+                statistics={} # Or add specific time window stats here
+            )
         else:
-            return {
-                'status': 'failed',
-                'error': 'No solution found with time window constraints!'
-            }
+            return OptimizationResult(
+                status='failed',
+                routes=[],
+                total_distance=0.0,
+                total_cost=0.0,
+                assigned_vehicles={},
+                unassigned_deliveries=[d.id for d in deliveries], # All deliveries unassigned
+                detailed_routes=[],
+                statistics={'error': 'No solution found with time window constraints!'}
+            )

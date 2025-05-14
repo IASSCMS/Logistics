@@ -8,7 +8,7 @@ from rest_framework import serializers
 from typing import Dict, List, Any
 
 from route_optimizer.core.types_1 import validate_optimization_result
-
+from route_optimizer.core.constants import DEFAULT_DELIVERY_PRIORITY
 
 class LocationSerializer(serializers.Serializer):
     """Serializer for Location objects."""
@@ -44,7 +44,7 @@ class DeliverySerializer(serializers.Serializer):
     id = serializers.CharField(max_length=100)
     location_id = serializers.CharField(max_length=100)
     demand = serializers.FloatField()
-    priority = serializers.IntegerField(default=1)
+    priority = serializers.IntegerField(default=DEFAULT_DELIVERY_PRIORITY)
     required_skills = serializers.ListField(child=serializers.CharField(max_length=100), default=list)
     is_pickup = serializers.BooleanField(default=False)
 
@@ -98,7 +98,7 @@ class ReroutingInfoSerializer(serializers.Serializer):
     """Serializer for rerouting information."""
     reason = serializers.CharField(max_length=50)
     traffic_factors = serializers.IntegerField(required=False, default=0)
-    delayed_locations = serializers.IntegerField(required=False, default=0)
+    delay_locations = serializers.IntegerField(required=False, default=0)
     blocked_segments = serializers.IntegerField(required=False, default=0)
     completed_deliveries = serializers.IntegerField(required=False, default=0)
     remaining_deliveries = serializers.IntegerField(required=False, default=0)
@@ -185,18 +185,30 @@ class TrafficDataSerializer(serializers.Serializer):
 
 class ReroutingRequestSerializer(serializers.Serializer):
     """Serializer for rerouting requests."""
-    current_routes = serializers.JSONField()
+    current_routes = serializers.JSONField() # Assuming current_routes is a dict representation of OptimizationResult
     locations = LocationSerializer(many=True)
     vehicles = VehicleSerializer(many=True)
+    original_deliveries = DeliverySerializer(many=True, help_text="The full list of original delivery objects relevant to the current_routes.")
+    
     completed_deliveries = serializers.ListField(
-        child=serializers.CharField(max_length=100), default=list
+        child=serializers.CharField(max_length=100), required=False, default=list
     )
-    traffic_data = TrafficDataSerializer(required=False)
+    reroute_type = serializers.ChoiceField(
+        choices=['traffic', 'delay', 'roadblock'], default='traffic'
+    )
+    
+    # Fields for traffic rerouting
+    traffic_data = serializers.JSONField(required=False, allow_null=True)
+    
+    # Fields for delay rerouting
     delayed_location_ids = serializers.ListField(
-        child=serializers.CharField(max_length=100), default=list
+        child=serializers.CharField(max_length=100), 
+        required=False, 
+        default=list
     )
     delay_minutes = serializers.DictField(
-        child=serializers.IntegerField(),
+        child=serializers.IntegerField(), 
+        required=False,
         default=dict
     )
     blocked_segments = serializers.ListField(
@@ -205,6 +217,7 @@ class ReroutingRequestSerializer(serializers.Serializer):
             min_length=2,
             max_length=2
         ),
+        required=False, 
         default=list
     )
     reroute_type = serializers.ChoiceField(

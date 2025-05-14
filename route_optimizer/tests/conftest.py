@@ -1,5 +1,3 @@
-# M:\Documents\B-Airways\Logistics\route_optimizer\tests\conftest.py
-
 import os
 import django
 import pytest

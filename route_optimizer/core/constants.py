@@ -11,12 +11,15 @@ MIN_SAFE_DISTANCE = 0.0        # Minimum safe distance value (km)
 MAX_SAFE_TIME = 24 * 60        # Maximum safe time value (minutes) - 24 hours
 MIN_SAFE_TIME = 0.0            # Minimum safe time value (minutes)
 
+# --- Delivery Priorities ---
+# Define your priority levels here.
+# Lower integer might mean higher priority, or vice versa, depending on your logic.
+# Example: Higher number = higher priority
+PRIORITY_LOW = 1
+PRIORITY_NORMAL = 2  # Or PRIORITY_MEDIUM
+PRIORITY_HIGH = 3
+PRIORITY_URGENT = 4
 
-# # Scaling factors for optimization algorithm
-# DISTANCE_SCALING_FACTOR = 1000  # Convert km to meters for integer calculations
-# CAPACITY_SCALING_FACTOR = 100   # Scale capacity values for integer calculations
-# TIME_SCALING_FACTOR = 60        # Convert minutes to seconds
+# Default priority if not specified
+DEFAULT_DELIVERY_PRIORITY = PRIORITY_NORMAL
 
-# # Safety limits
-# MAX_SAFE_DISTANCE = 10000.0     # Maximum reasonable distance in km
-# MAX_SAFE_TIME = 24 * 60 * 60    # Maximum reasonable time in seconds (24 hours)

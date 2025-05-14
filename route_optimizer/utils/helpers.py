@@ -10,6 +10,7 @@ import datetime
 import json
 from math import radians, cos, sin, asin, sqrt
 
+from route_optimizer.core.distance_matrix import DistanceMatrixBuilder
 from route_optimizer.core.constants import MAX_SAFE_DISTANCE, TIME_SCALING_FACTOR
 
 # Set up logging
@@ -47,31 +48,6 @@ def convert_time_str_to_minutes(time_str: str) -> int:
         logger.error(f"Invalid time string format: {time_str}")
         return 0
 
-
-def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """
-    Calculate the great circle distance between two points
-    on the earth (specified in decimal degrees).
-    
-    Args:
-        lat1, lon1: Coordinates of first point
-        lat2, lon2: Coordinates of second point
-        
-    Returns:
-        Distance in kilometers
-    """
-    # Convert decimal degrees to radians
-    lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
-    
-    # Haversine formula
-    dlon = lon2 - lon1
-    dlat = lat2 - lat1
-    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
-    c = 2 * asin(sqrt(a))
-    r = 6371  # Radius of earth in kilometers
-    return c * r
-
-
 def format_route_for_display(route: List[str], location_names: Dict[str, str]) -> str:
     """
     Format a route for display, converting location IDs to names.
@@ -85,97 +61,6 @@ def format_route_for_display(route: List[str], location_names: Dict[str, str]) -
     """
     route_with_names = [f"{location_names.get(loc_id, loc_id)}" for loc_id in route]
     return " → ".join(route_with_names)
-
-
-def calculate_route_statistics(
-    routes: List[Dict[str, Any]],
-    vehicles: Dict[str, Any]
-) -> Dict[str, Any]:
-    """
-    Calculate statistics for the routes.
-    
-    Args:
-        routes: List of route dictionaries.
-        vehicles: Dictionary of vehicles with capacities.
-        
-    Returns:
-        Dictionary of route statistics.
-    """
-    statistics = {
-        "total_distance": 0.0,
-        "total_cost": 0.0,
-        "total_time": 0.0,
-        "vehicle_utilization": 0.0,
-        "average_capacity_utilization": 0.0,
-        "num_vehicles_used": 0,
-    }
-    
-    capacity_utils = []
-    
-    for route in routes:
-        statistics["total_distance"] += route.get("total_distance", 0.0)
-        statistics["total_cost"] += route.get("total_cost", 0.0)
-        statistics["total_time"] += route.get("total_time", 0.0)
-        
-        if route.get("capacity_utilization") is not None:
-            capacity_utils.append(route["capacity_utilization"])
-    
-    statistics["num_vehicles_used"] = len(routes)
-    
-    if statistics["num_vehicles_used"] > 0:
-        statistics["vehicle_utilization"] = statistics["num_vehicles_used"] / len(vehicles)
-    
-    if capacity_utils:
-        statistics["average_capacity_utilization"] = sum(capacity_utils) / len(capacity_utils)
-    
-    return statistics
-
-def create_distance_time_matrices(
-    locations: List[Any],
-    speed_km_per_hour: float = 50.0,
-    use_haversine: bool = True
-) -> Tuple[np.ndarray, np.ndarray, List[str]]:
-    """
-    Create distance and time matrices from a list of locations.
-    
-    Args:
-        locations: List of Location objects.
-        speed_km_per_hour: Average speed in km/h.
-        use_haversine: If True, use haversine formula for calculating distances.
-        
-    Returns:
-        Tuple containing:
-        - 2D numpy array representing distances between locations in km
-        - 2D numpy array representing times between locations in minutes
-        - List of location IDs corresponding to the matrix indices
-    """
-    num_locations = len(locations)
-    distance_matrix = np.zeros((num_locations, num_locations))
-    time_matrix = np.zeros((num_locations, num_locations))
-    location_ids = [loc.id for loc in locations]
-    
-    for i in range(num_locations):
-        for j in range(num_locations):
-            if i != j:
-                if use_haversine:
-                    distance = haversine_distance(
-                        locations[i].latitude, locations[i].longitude,
-                        locations[j].latitude, locations[j].longitude
-                    )
-                else:
-                    # Euclidean distance as a fallback
-                    distance = sqrt(
-                        (locations[i].latitude - locations[j].latitude)**2 +
-                        (locations[i].longitude - locations[j].longitude)**2
-                    )
-                
-                distance_matrix[i, j] = distance
-                
-                # Calculate time in minutes
-                time_matrix[i, j] = (distance / speed_km_per_hour) * 60
-    
-    return distance_matrix, time_matrix, location_ids
-
 
 def apply_external_factors(
     distance_matrix: np.ndarray,

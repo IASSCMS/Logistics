@@ -38,6 +38,7 @@ class ReroutingService:
         current_routes: Dict[str, Any],
         locations: List[Location],
         vehicles: List[Vehicle],
+        original_deliveries: List[Delivery],
         completed_deliveries: List[str],
         traffic_data: Dict[Tuple[int, int], float]
     ) -> OptimizationResult:
@@ -58,12 +59,12 @@ class ReroutingService:
         """
         # Filter out completed deliveries
         remaining_deliveries = self._get_remaining_deliveries(
-            current_routes, completed_deliveries
+            original_deliveries, completed_deliveries
         )
         
         # Update vehicle positions
         updated_vehicles = self._update_vehicle_positions(
-            vehicles, current_routes, completed_deliveries
+            vehicles, current_routes, completed_deliveries, original_deliveries
         )
         
         # Re-optimize with traffic data
@@ -97,13 +98,6 @@ class ReroutingService:
                 'remaining_deliveries': len(remaining_deliveries)
             }
         
-        # # Validate result before returning
-        # if isinstance(new_routes, dict):
-        #     try:
-        #         validate_optimization_result(new_routes)
-        #     except ValueError as e:
-        #         logger.warning(f"Rerouting result validation warning: {e}")
-        
         return new_routes
     
     def reroute_for_delay(
@@ -111,6 +105,7 @@ class ReroutingService:
         current_routes: Dict[str, Any],
         locations: List[Location],
         vehicles: List[Vehicle],
+        original_deliveries: List[Delivery],
         completed_deliveries: List[str],
         delayed_location_ids: List[str],
         delay_minutes: Dict[str, int]
@@ -138,12 +133,12 @@ class ReroutingService:
         
         # Filter out completed deliveries
         remaining_deliveries = self._get_remaining_deliveries(
-            current_routes, completed_deliveries
+            original_deliveries, completed_deliveries
         )
         
         # Update vehicle positions
         updated_vehicles = self._update_vehicle_positions(
-            vehicles, current_routes, completed_deliveries
+            vehicles, current_routes, completed_deliveries, original_deliveries
         )
         
         # Re-optimize with updated service times
@@ -159,7 +154,7 @@ class ReroutingService:
             # Create ReroutingInfo DTO
             rerouting_info = ReroutingInfo(
                 reason='service_delay',
-                delayed_locations=len(delayed_location_ids),
+                delay_locations=delayed_location_ids,
                 completed_deliveries=len(completed_deliveries),
                 remaining_deliveries=len(remaining_deliveries)
             )
@@ -171,7 +166,7 @@ class ReroutingService:
             # Add rerouting metadata for dict case (backward compatibility)
             new_routes['rerouting_info'] = {
                 'reason': 'service_delay',
-                'delayed_locations': len(delayed_location_ids),
+                'delay_locations': len(delayed_location_ids),
                 'completed_deliveries': len(completed_deliveries),
                 'remaining_deliveries': len(remaining_deliveries)
             }
@@ -184,6 +179,7 @@ class ReroutingService:
         current_routes: Dict[str, Any],
         locations: List[Location],
         vehicles: List[Vehicle],
+        original_deliveries: List[Delivery],
         completed_deliveries: List[str],
         blocked_segments: List[Tuple[str, str]]
     ) -> OptimizationResult:
@@ -222,12 +218,12 @@ class ReroutingService:
         
         # Filter out completed deliveries
         remaining_deliveries = self._get_remaining_deliveries(
-            current_routes, completed_deliveries
+            original_deliveries, completed_deliveries
         )
         
         # Update vehicle positions
         updated_vehicles = self._update_vehicle_positions(
-            vehicles, current_routes, completed_deliveries
+            vehicles, current_routes, completed_deliveries, original_deliveries
         )
         
         # Create a custom traffic data structure for the modified distances
@@ -246,95 +242,127 @@ class ReroutingService:
             traffic_data=traffic_data
         )
         
-        # Add rerouting metadata
-        new_routes['rerouting_info'] = {
-            'reason': 'roadblock',
-            'blocked_segments': len(blocked_segments),
-            'completed_deliveries': len(completed_deliveries),
-            'remaining_deliveries': len(remaining_deliveries)
-        }
+        # Handle both OptimizationResult and dict cases (though optimize_routes should return OptimizationResult)
+        if isinstance(new_routes, OptimizationResult):
+            rerouting_info_dto = ReroutingInfo(
+                reason='roadblock',
+                # Note: ReroutingInfo DTO has 'delay_locations' and 'traffic_factors',
+                # but not directly 'blocked_segments' as an int. You might want to add
+                # 'blocked_segments_count' to ReroutingInfo DTO or use an existing field.
+                # For now, let's assume we want to store the count in a generic way
+                # or adapt the DTO. For simplicity, I'll put it in statistics directly
+                # if not fitting neatly into ReroutingInfo.
+                blocked_segments=blocked_segments, # Pass the actual list of tuples
+                completed_deliveries=len(completed_deliveries),
+                remaining_deliveries=len(remaining_deliveries)
+            )
+            if not new_routes.statistics:
+                new_routes.statistics = {}
+                    
+            # Add specific roadblock info
+            new_routes.statistics['rerouting_info'] = vars(rerouting_info_dto)
+            new_routes.statistics['rerouting_info']['blocked_segments_count'] = len(blocked_segments)
+
+        else: # dict case
+            new_routes['rerouting_info'] = {
+                'reason': 'roadblock',
+                'blocked_segments': len(blocked_segments), # Original field name
+                'completed_deliveries': len(completed_deliveries),
+                'remaining_deliveries': len(remaining_deliveries)
+            }
         
         return new_routes
     
     def _get_remaining_deliveries(
         self,
-        current_routes: Dict[str, Any],
+        original_deliveries: List[Delivery],
         completed_delivery_ids: List[str]
     ) -> List[Delivery]:
         """
-        Extract the remaining deliveries that need to be completed.
+        Extract the remaining deliveries from the original list that need to be completed.
         
         Args:
-            current_routes: Current route plan.
+            original_deliveries: The full list of Delivery objects that were initially planned.
             completed_delivery_ids: IDs of deliveries that have been completed.
         
         Returns:
             List of remaining Delivery objects.
         """
-        # This is a placeholder implementation
-        # In a real system, you'd need to map from the route structure to actual Delivery objects
-        # For this example, we'll assume the system stores deliveries in current_routes['deliveries']
-        
         completed_set = set(completed_delivery_ids)
-        remaining_deliveries = []
+        remaining_deliveries = [
+            delivery for delivery in original_deliveries if delivery.id not in completed_set
+        ]
         
-        if 'deliveries' in current_routes:
-            for delivery in current_routes['deliveries']:
-                if delivery.id not in completed_set:
-                    remaining_deliveries.append(delivery)
-        
+        if not original_deliveries and completed_delivery_ids:
+            logger.warning("_get_remaining_deliveries: Original deliveries list is empty, but completed IDs were provided.")
+        elif not original_deliveries:
+            logger.info("_get_remaining_deliveries: Original deliveries list is empty.")
+
         return remaining_deliveries
     
     def _update_vehicle_positions(
         self,
         vehicles: List[Vehicle],
-        current_routes: Dict[str, Any],
-        completed_delivery_ids: List[str]
+        current_routes: Dict[str, Any], # This is a dictionary representation of OptimizationResult
+        completed_delivery_ids: List[str],
+        original_deliveries: List[Delivery]
     ) -> List[Vehicle]:
         """
         Update vehicle positions based on completed deliveries.
+        This is a simplified approach: assumes vehicle is at the *next planned stop*
+        after its last completed delivery in the *current_routes* plan.
         
         Args:
             vehicles: List of original Vehicle objects.
-            current_routes: Current route plan.
+            current_routes: Dictionary representation of the current route plan.
             completed_delivery_ids: IDs of deliveries that have been completed.
+            original_deliveries: The full list of Delivery objects to map delivery IDs to locations.
         
         Returns:
             Updated list of Vehicle objects with new start locations.
         """
-        # Create a mapping from delivery IDs to location IDs
-        delivery_to_location = {}
-        if 'deliveries' in current_routes:
-            for delivery in current_routes['deliveries']:
-                delivery_to_location[delivery.id] = delivery.location_id
+        delivery_to_location = {
+            delivery.id: delivery.location_id for delivery in original_deliveries
+        }
         
-        # Create a deep copy of vehicles to modify
         updated_vehicles = copy.deepcopy(vehicles)
         
-        # Map vehicle IDs to their assigned routes
-        vehicle_routes = {}
-        if 'assigned_vehicles' in current_routes:
-            for vehicle_id, route_idx in current_routes['assigned_vehicles'].items():
-                if 'detailed_routes' in current_routes and route_idx < len(current_routes['detailed_routes']):
-                    vehicle_routes[vehicle_id] = current_routes['detailed_routes'][route_idx]['stops']
-        
-        # Update each vehicle's starting position
+        assigned_vehicles_map = current_routes.get('assigned_vehicles', {})
+        detailed_routes_list = current_routes.get('detailed_routes', [])
+
         for vehicle in updated_vehicles:
-            route = vehicle_routes.get(vehicle.id)
-            if not route:
+            route_idx = assigned_vehicles_map.get(vehicle.id)
+            
+            if route_idx is None or route_idx >= len(detailed_routes_list):
+                continue # Vehicle not in current plan or route index invalid
+
+            current_vehicle_route_info = detailed_routes_list[route_idx]
+            # Ensure 'stops' are actual location IDs, not indices
+            route_stops = current_vehicle_route_info.get('stops', []) 
+            
+            if not route_stops:
                 continue
+
+            last_completed_stop_index_in_route = -1
+            for i, stop_location_id in enumerate(route_stops):
+                # Check if any completed delivery corresponds to this stop_location_id
+                for completed_id in completed_delivery_ids:
+                    if delivery_to_location.get(completed_id) == stop_location_id:
+                        # This stop had a completed delivery. Mark its index.
+                        last_completed_stop_index_in_route = max(last_completed_stop_index_in_route, i)
             
-            # Find the last completed delivery for this vehicle
-            last_completed_idx = -1
-            for i, location_id in enumerate(route):
-                # Check if any completed delivery is at this location
-                for delivery_id in completed_delivery_ids:
-                    if delivery_to_location.get(delivery_id) == location_id:
-                        last_completed_idx = max(last_completed_idx, i)
-            
-            # Update vehicle starting location if deliveries have been completed
-            if last_completed_idx >= 0 and last_completed_idx < len(route) - 1:
-                # Set new starting location to the location after the last completed one
-                vehicle.start_location_id = route[last_completed_idx + 1]
-        
+            # If a delivery was completed on this route and it's not the very last stop
+            if 0 <= last_completed_stop_index_in_route < len(route_stops) - 1:
+                # New start location is the stop *after* the last completed one
+                new_start_location_id = route_stops[last_completed_stop_index_in_route + 1]
+                logger.info(f"Updating vehicle {vehicle.id} start location from {vehicle.start_location_id} to {new_start_location_id} based on completed deliveries.")
+                vehicle.start_location_id = new_start_location_id
+            elif last_completed_stop_index_in_route == len(route_stops) -1:
+                 # All stops on this route completed, vehicle is at its planned end.
+                 # Keep its original end_location_id or start if end is not defined.
+                 # This part might need more sophisticated logic if vehicle should be "free"
+                 logger.info(f"Vehicle {vehicle.id} completed all stops on its route. Positioned at planned end {route_stops[last_completed_stop_index_in_route]}.")
+                 vehicle.start_location_id = route_stops[last_completed_stop_index_in_route]
+
+
         return updated_vehicles

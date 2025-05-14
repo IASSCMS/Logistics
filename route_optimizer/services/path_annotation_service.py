@@ -1,4 +1,5 @@
-from venv import logger
+import logging
+logger = logging.getLogger(__name__)
 
 from route_optimizer.core.types_1 import DetailedRoute, OptimizationResult, RouteSegment
 

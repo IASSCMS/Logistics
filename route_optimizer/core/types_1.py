@@ -62,11 +62,11 @@ class DetailedRoute:
 class ReroutingInfo:
     """Information about a rerouting operation."""
     reason: str
-    traffic_factors: int = 0
+    traffic_factors: int = 0 # Count of traffic factors applied
     completed_deliveries: int = 0
     remaining_deliveries: int = 0
-    delay_locations: List[str] = field(default_factory=list)
-    blocked_segments: List[Tuple[str, str]] = field(default_factory=list)
+    delay_locations: List[str] = field(default_factory=list) # Actual IDs of delayed locations
+    blocked_segments: List[Tuple[str, str]] = field(default_factory=list) # Actual (from,to) tuples of blocked segments
     
 def validate_optimization_result(result: Dict[str, Any]) -> bool:
     """
