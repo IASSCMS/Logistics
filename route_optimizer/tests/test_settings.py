@@ -59,3 +59,5 @@ USE_API_BY_DEFAULT = False
 # For test performance
 BACKOFF_FACTOR = 0.1  # Faster retries in tests
 RETRY_DELAY_SECONDS = 0.1  # Minimal delay for tests
+
+ROOT_URLCONF = 'route_optimizer.api.urls' # Point to your app's API URLs for testing views

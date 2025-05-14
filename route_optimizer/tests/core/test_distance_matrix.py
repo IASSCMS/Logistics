@@ -7,7 +7,7 @@ import json
 from datetime import datetime, timedelta
 
 from route_optimizer.core.distance_matrix import DistanceMatrixBuilder, Location
-from route_optimizer.core.constants import DISTANCE_SCALING_FACTOR, MAX_SAFE_DISTANCE
+from route_optimizer.core.constants import DISTANCE_SCALING_FACTOR, MAX_SAFE_DISTANCE, MAX_SAFE_TIME
 
 class TestDistanceMatrixBuilder(unittest.TestCase):
     """Test cases for DistanceMatrixBuilder."""
@@ -47,97 +47,108 @@ class TestDistanceMatrixBuilder(unittest.TestCase):
 
     def test_create_distance_matrix_euclidean(self):
         """Test creating a distance matrix using Euclidean distance."""
-        matrix, location_ids = self.builder.create_distance_matrix(
-            self.locations, 
-            distance_calculation="euclidean"
+        # Test without average_speed_kmh (time_matrix should be None)
+        dist_matrix, time_matrix, location_ids = self.builder.create_distance_matrix(
+            self.locations,
+            distance_calculation="euclidean",
+            average_speed_kmh=None # Explicitly None
         )
-        
-        # Check matrix shape
-        self.assertEqual(matrix.shape, (4, 4))
-        
-        # Check location IDs
+
+        self.assertEqual(dist_matrix.shape, (4, 4))
+        self.assertIsNone(time_matrix) # Expect None if no speed is provided
         self.assertEqual(location_ids, ["depot", "customer1", "customer2", "customer3"])
-        
-        # Check some specific distances (Euclidean)
-        # Depot to Customer1 (0,0) to (1,1) = sqrt(2) ≈ 1.414
-        self.assertAlmostEqual(matrix[0, 1], 1.414, delta=0.001)
-        
-        # Check diagonal (should be zeros)
+        self.assertAlmostEqual(dist_matrix[0, 1], 1.414, delta=0.001) # (0,0) to (1,1)
         for i in range(4):
-            self.assertEqual(matrix[i, i], 0.0)
+            self.assertEqual(dist_matrix[i, i], 0.0)
+
+        # Test with average_speed_kmh (time_matrix should be estimated)
+        dist_matrix_2, time_matrix_2, location_ids_2 = self.builder.create_distance_matrix(
+            self.locations,
+            distance_calculation="euclidean",
+            average_speed_kmh=60 # e.g., 60 km/h
+        )
+        self.assertEqual(dist_matrix_2.shape, (4, 4))
+        self.assertIsNotNone(time_matrix_2)
+        self.assertEqual(time_matrix_2.shape, (4, 4))
+        self.assertEqual(location_ids_2, ["depot", "customer1", "customer2", "customer3"])
+        # Time for (0,0) to (1,1) = 1.414 km / 60 km/h * 60 min/h = 1.414 minutes
+        self.assertAlmostEqual(time_matrix_2[0, 1], 1.414, delta=0.001)
+        for i in range(4):
+            self.assertEqual(time_matrix_2[i, i], 0.0)
 
     def test_create_distance_matrix_haversine(self):
         """Test creating a distance matrix using Haversine distance."""
-        matrix, location_ids = self.builder.create_distance_matrix(
-            self.locations, 
-            distance_calculation="haversine"
+        # Test without average_speed_kmh
+        dist_matrix, time_matrix, location_ids = self.builder.create_distance_matrix(
+            self.locations,
+            distance_calculation="haversine", # or use_haversine=True
+            average_speed_kmh=None
         )
-        
-        # Check matrix shape
-        self.assertEqual(matrix.shape, (4, 4))
-        
-        # Check location IDs
+
+        self.assertEqual(dist_matrix.shape, (4, 4))
+        self.assertIsNone(time_matrix)
         self.assertEqual(location_ids, ["depot", "customer1", "customer2", "customer3"])
-        
-        # Check diagonal (should be zeros)
+        # Depot (0,0) to Customer1 (1,1) is ~157.2 km
+        self.assertAlmostEqual(dist_matrix[0, 1], 157.2, delta=1.0)
         for i in range(4):
-            self.assertEqual(matrix[i, i], 0.0)
+            self.assertEqual(dist_matrix[i, i], 0.0)
+
+        # Test with average_speed_kmh
+        dist_matrix_2, time_matrix_2, location_ids_2 = self.builder.create_distance_matrix(
+            self.locations,
+            distance_calculation="haversine",
+            average_speed_kmh=100 # e.g., 100 km/h
+        )
+        self.assertEqual(dist_matrix_2.shape, (4, 4))
+        self.assertIsNotNone(time_matrix_2)
+        self.assertEqual(time_matrix_2.shape, (4, 4))
+        self.assertEqual(location_ids_2, ["depot", "customer1", "customer2", "customer3"])
+        # Time for (0,0) to (1,1) = 157.2 km / 100 km/h * 60 min/h = 94.32 minutes
+        self.assertAlmostEqual(time_matrix_2[0, 1], (157.2 / 100.0) * 60.0, delta=1.0)
+        for i in range(4):
+            self.assertEqual(time_matrix_2[i, i], 0.0)
 
     def test_process_api_response(self):
-        """Test processing of Google API response data."""
+        """Test processing of Google API response data, ensuring km and minutes."""
         mock_response = {
             'rows': [
-                {
-                    'elements': [
-                        {'status': 'OK', 'distance': {'value': 10000}, 'duration': {'value': 600}},
-                        {'status': 'OK', 'distance': {'value': 20000}, 'duration': {'value': 1200}}
-                    ]
-                },
-                {
-                    'elements': [
-                        {'status': 'OK', 'distance': {'value': 30000}, 'duration': {'value': 1800}},
-                        {'status': 'OK', 'distance': {'value': 5000}, 'duration': {'value': 300}}
-                    ]
-                }
+                {'elements': [
+                    {'status': 'OK', 'distance': {'value': 10000}, 'duration': {'value': 600}}, # 10km, 10min
+                    {'status': 'OK', 'distance': {'value': 20000}, 'duration': {'value': 1200}} # 20km, 20min
+                ]},
+                {'elements': [
+                    {'status': 'OK', 'distance': {'value': 30000}, 'duration': {'value': 1800}}, # 30km, 30min
+                    {'status': 'OK', 'distance': {'value': 5000}, 'duration': {'value': 300}}   # 5km, 5min
+                ]}
             ]
         }
-        
-        distance_matrix, time_matrix = DistanceMatrixBuilder._process_api_response(mock_response)
-        
-        # Check that distances are in meters
-        self.assertEqual(distance_matrix[0][0], 10000)  # 10000m = 10km
-        self.assertEqual(distance_matrix[0][1], 20000)  # 20000m = 20km
-        self.assertEqual(distance_matrix[1][0], 30000)  # 30000m = 30km
-        self.assertEqual(distance_matrix[1][1], 5000)   # 5000m = 5km
-        
-        # Check that times are correctly processed (in seconds)
-        self.assertEqual(time_matrix[0][0], 600)
-        self.assertEqual(time_matrix[0][1], 1200)
-        self.assertEqual(time_matrix[1][0], 1800)
-        self.assertEqual(time_matrix[1][1], 300)
+        distance_matrix_list_km, time_matrix_list_min = DistanceMatrixBuilder._process_api_response(mock_response)
+
+        expected_distances_km = [[10.0, 20.0], [30.0, 5.0]]
+        expected_times_min = [[10.0, 20.0], [30.0, 5.0]]
+
+        self.assertEqual(distance_matrix_list_km, expected_distances_km)
+        self.assertEqual(time_matrix_list_min, expected_times_min)
 
     def test_process_api_response_with_errors(self):
-        """Test processing of Google API response with errors."""
+        """Test processing of Google API response with errors, using MAX_SAFE values."""
         mock_response = {
             'rows': [
-                {
-                    'elements': [
-                        {'status': 'OK', 'distance': {'value': 10000}, 'duration': {'value': 600}},
-                        {'status': 'ZERO_RESULTS', 'error_message': 'No route found'}
-                    ]
-                }
+                {'elements': [
+                    {'status': 'OK', 'distance': {'value': 10000}, 'duration': {'value': 600}},
+                    {'status': 'ZERO_RESULTS', 'error_message': 'No route found'}
+                ]}
             ]
         }
-        
-        distance_matrix, time_matrix = DistanceMatrixBuilder._process_api_response(mock_response)
-        
-        # Check correct values for valid route
-        self.assertEqual(distance_matrix[0][0], 10000)
-        self.assertEqual(time_matrix[0][0], 600)
-        
-        # Check that inf is used for invalid routes
-        self.assertEqual(distance_matrix[0][1], float('inf'))
-        self.assertEqual(time_matrix[0][1], float('inf'))
+        distance_matrix_list_km, time_matrix_list_min = DistanceMatrixBuilder._process_api_response(mock_response)
+
+        # Check correct values for valid route (km and minutes)
+        self.assertEqual(distance_matrix_list_km[0][0], 10.0) # 10km
+        self.assertEqual(time_matrix_list_min[0][0], 10.0)   # 10 minutes
+
+        # Check that MAX_SAFE_DISTANCE and MAX_SAFE_TIME are used for invalid routes
+        self.assertEqual(distance_matrix_list_km[0][1], MAX_SAFE_DISTANCE) # MAX_SAFE_DISTANCE is in km
+        self.assertEqual(time_matrix_list_min[0][1], MAX_SAFE_TIME)       # MAX_SAFE_TIME is in minutes
 
     @patch('requests.get')
     def test_send_request(self, mock_get):
@@ -218,52 +229,38 @@ class TestDistanceMatrixBuilder(unittest.TestCase):
         
         self.assertTrue("All API request retries failed" in str(context.exception))
 
-    @patch('requests.get')
-    def test_fetch_distance_and_time_matrices(self, mock_get):
-        """Test fetching complete distance and time matrices."""
-        # Create a mock response
-        mock_response = MagicMock()
-        mock_response.json.return_value = {
+    @patch('route_optimizer.core.distance_matrix.DistanceMatrixBuilder._send_request_with_retry')
+    def test_fetch_distance_and_time_matrices(self, mock_send_retry):
+        """Test fetching complete distance and time matrices in km and minutes."""
+        mock_api_response_json = { # API raw response (meters, seconds)
             'status': 'OK',
             'rows': [
-                {
-                    'elements': [
-                        {'status': 'OK', 'distance': {'value': 0}, 'duration': {'value': 0}},
-                        {'status': 'OK', 'distance': {'value': 10000}, 'duration': {'value': 600}}
-                    ]
-                },
-                {
-                    'elements': [
-                        {'status': 'OK', 'distance': {'value': 10000}, 'duration': {'value': 600}},
-                        {'status': 'OK', 'distance': {'value': 0}, 'duration': {'value': 0}}
-                    ]
-                }
+                {'elements': [
+                    {'status': 'OK', 'distance': {'value': 0}, 'duration': {'value': 0}},
+                    {'status': 'OK', 'distance': {'value': 10000}, 'duration': {'value': 600}}
+                ]},
+                {'elements': [
+                    {'status': 'OK', 'distance': {'value': 10000}, 'duration': {'value': 600}},
+                    {'status': 'OK', 'distance': {'value': 0}, 'duration': {'value': 0}}
+                ]}
             ]
         }
-        mock_get.return_value = mock_response
-        
-        # Patch the _send_request_with_retry to use our mock
-        with patch.object(DistanceMatrixBuilder, '_send_request_with_retry', return_value=mock_response.json()):
-            data = {
-                "addresses": ["Address 1", "Address 2"],
-                "API_key": "dummy_key"
-            }
-            distance_matrix, time_matrix = DistanceMatrixBuilder._fetch_distance_and_time_matrices(data)
-            
-            # Should have 2 rows in the result
-            self.assertEqual(len(distance_matrix), 2)
-            self.assertEqual(len(time_matrix), 2)
-            
-            # Check values
-            self.assertEqual(distance_matrix[0][0], 0.0)
-            self.assertEqual(distance_matrix[0][1], 10000)
-            self.assertEqual(distance_matrix[1][0], 10000)
-            self.assertEqual(distance_matrix[1][1], 0.0)
-            
-            self.assertEqual(time_matrix[0][0], 0)
-            self.assertEqual(time_matrix[0][1], 600)
-            self.assertEqual(time_matrix[1][0], 600)
-            self.assertEqual(time_matrix[1][1], 0)
+        mock_send_retry.return_value = mock_api_response_json
+
+        data_for_api = {
+            "addresses": ["0.0,0.0", "1.0,1.0"], # Using lat,lon strings as _format_address does
+            "API_key": "dummy_key"
+        }
+        # _fetch_distance_and_time_matrices internally calls _process_api_response
+        # So, its output should be in km and minutes
+        dist_list_km, time_list_min = DistanceMatrixBuilder._fetch_distance_and_time_matrices(data_for_api)
+
+        expected_dist_km = [[0.0, 10.0], [10.0, 0.0]] # 10000m -> 10km
+        expected_time_min = [[0.0, 10.0], [10.0, 0.0]] # 600s -> 10min
+
+        self.assertEqual(dist_list_km, expected_dist_km)
+        self.assertEqual(time_list_min, expected_time_min)
+        mock_send_retry.assert_called_once()
 
     def test_sanitize_distance_matrix(self):
         """Test sanitization of distance matrix."""
@@ -338,31 +335,36 @@ class TestDistanceMatrixBuilder(unittest.TestCase):
 
     @patch('route_optimizer.models.DistanceMatrixCache.objects.filter')
     def test_get_cached_matrix(self, mock_filter):
-        """Test retrieving matrix from cache."""
-        # Create a mock cached result
-        mock_cache = MagicMock()
-        mock_cache.matrix_data = json.dumps([[0.0, 10.0], [10.0, 0.0]])
-        mock_cache.location_ids = json.dumps(["loc1", "loc2"])
-        
-        # Make filter return our mock cache object
-        mock_filter.return_value.first.return_value = mock_cache
-        
-        # Create test locations
-        locations = [
-            Location(id="loc1", name="Location 1", latitude=0.0, longitude=0.0),
-            Location(id="loc2", name="Location 2", latitude=1.0, longitude=1.0)
-        ]
-        
-        # Get cached matrix
-        matrix, ids = DistanceMatrixBuilder.get_cached_matrix(locations)
-        
-        # Check result
-        self.assertEqual(matrix.tolist(), [[0.0, 10.0], [10.0, 0.0]])
-        self.assertEqual(ids, ["loc1", "loc2"])
-        
-        # Verify the filter was called with the right arguments
+        """Test retrieving matrix from cache, including time matrix."""
+        mock_cache_entry = MagicMock()
+        mock_cache_entry.matrix_data = json.dumps([[0.0, 10.0], [10.0, 0.0]]) # Distances in km
+        mock_cache_entry.time_matrix_data = json.dumps([[0.0, 5.0], [5.0, 0.0]]) # Times in minutes
+        mock_cache_entry.location_ids = json.dumps(["loc1", "loc2"])
+
+        mock_filter.return_value.first.return_value = mock_cache_entry
+
+        cached_dist_matrix, cached_time_matrix, cached_loc_ids = DistanceMatrixBuilder.get_cached_matrix(self.locations[:2])
+
+        self.assertTrue(np.array_equal(cached_dist_matrix, np.array([[0.0, 10.0], [10.0, 0.0]])))
+        self.assertIsNotNone(cached_time_matrix)
+        self.assertTrue(np.array_equal(cached_time_matrix, np.array([[0.0, 5.0], [5.0, 0.0]])))
+        self.assertEqual(cached_loc_ids, ["loc1", "loc2"])
         mock_filter.assert_called_once()
-        # We can't easily verify the exact arguments due to the hash being computed
+
+    @patch('route_optimizer.models.DistanceMatrixCache.objects.filter')
+    def test_get_cached_matrix_no_time_matrix(self, mock_filter):
+        """Test retrieving matrix from cache when time_matrix_data is None."""
+        mock_cache_entry = MagicMock()
+        mock_cache_entry.matrix_data = json.dumps([[0.0, 10.0], [10.0, 0.0]])
+        mock_cache_entry.time_matrix_data = None # Explicitly None
+        mock_cache_entry.location_ids = json.dumps(["loc1", "loc2"])
+        mock_filter.return_value.first.return_value = mock_cache_entry
+
+        cached_dist_matrix, cached_time_matrix, cached_loc_ids = DistanceMatrixBuilder.get_cached_matrix(self.locations[:2])
+
+        self.assertTrue(np.array_equal(cached_dist_matrix, np.array([[0.0, 10.0], [10.0, 0.0]])))
+        self.assertIsNone(cached_time_matrix)
+        self.assertEqual(cached_loc_ids, ["loc1", "loc2"])
 
     @patch('route_optimizer.models.DistanceMatrixCache.objects.update_or_create')
     def test_cache_matrix(self, mock_update_or_create):
@@ -390,80 +392,126 @@ class TestDistanceMatrixBuilder(unittest.TestCase):
         self.assertEqual(json.loads(defaults['time_matrix_data']), time_matrix)
         self.assertTrue('created_at' in defaults)
 
-    @patch('requests.get')
     @patch('route_optimizer.core.distance_matrix.DistanceMatrixBuilder.get_cached_matrix')
     @patch('route_optimizer.core.distance_matrix.DistanceMatrixBuilder.cache_matrix')
-    def test_create_distance_matrix_from_api(self, mock_cache_matrix, mock_get_cached, mock_get):
-        """Test full end-to-end API matrix creation."""
-        # Mock cached matrix to return None (cache miss)
-        mock_get_cached.return_value = None
-        
-        # Mock API response
-        mock_response = MagicMock()
-        mock_response.json.return_value = {
-            'status': 'OK',
-            'rows': [
-                {
-                    'elements': [
-                        {'status': 'OK', 'distance': {'value': 0}, 'duration': {'value': 0}},
-                        {'status': 'OK', 'distance': {'value': 10000}, 'duration': {'value': 600}}
-                    ]
-                },
-                {
-                    'elements': [
-                        {'status': 'OK', 'distance': {'value': 10000}, 'duration': {'value': 600}},
-                        {'status': 'OK', 'distance': {'value': 0}, 'duration': {'value': 0}}
-                    ]
-                }
-            ]
-        }
-        mock_get.return_value = mock_response
-        
-        # Patch the helper methods to use our mocks
-        with patch.object(DistanceMatrixBuilder, '_send_request_with_retry', return_value=mock_response.json()):
-            # Call the method
-            matrix, location_ids = DistanceMatrixBuilder.create_distance_matrix_from_api(
-                self.locations[:2],  # Just use two locations
-                api_key='dummy_key',
-                use_cache=True
-            )
-            
-            # Verify the matrix
-            self.assertEqual(matrix.shape, (2, 2))
-            self.assertEqual(matrix[0, 1], 10000)  # 10km
-            self.assertEqual(matrix[1, 0], 10000)  # 10km
-            
-            # Verify cache was checked and result was cached
-            mock_get_cached.assert_called_once()
-            mock_cache_matrix.assert_called_once()
+    @patch('route_optimizer.core.distance_matrix.DistanceMatrixBuilder._fetch_distance_and_time_matrices')
+    def test_create_distance_matrix_from_api(self, mock_fetch_matrices, mock_cache_matrix, mock_get_cached):
+        """Test API matrix creation (km and minutes) with cache miss."""
+        mock_get_cached.return_value = None # Cache miss
+
+        # _fetch_distance_and_time_matrices returns (dist_list_km, time_list_min)
+        mock_dist_list_km = [[0.0, 10.0], [10.0, 0.0]] # Already in km
+        mock_time_list_min = [[0.0, 5.0], [5.0, 0.0]]   # Already in minutes
+        mock_fetch_matrices.return_value = (mock_dist_list_km, mock_time_list_min)
+
+        dist_matrix_km, time_matrix_min, loc_ids = DistanceMatrixBuilder.create_distance_matrix_from_api(
+            self.locations[:2], api_key='dummy_key', use_cache=True
+        )
+
+        self.assertEqual(dist_matrix_km.shape, (2, 2))
+        self.assertEqual(time_matrix_min.shape, (2, 2))
+        self.assertEqual(loc_ids, ["depot", "customer1"])
+
+        self.assertAlmostEqual(dist_matrix_km[0, 1], 10.0) # km
+        self.assertAlmostEqual(time_matrix_min[0, 1], 5.0) # minutes
+
+        mock_get_cached.assert_called_once()
+        mock_fetch_matrices.assert_called_once()
+        # Check that the data passed to cache_matrix is what _fetch_matrices returned (np arrays)
+        mock_cache_matrix.assert_called_once()
+        args, _ = mock_cache_matrix.call_args
+        self.assertTrue(np.array_equal(args[0], np.array(mock_dist_list_km))) # distance_matrix_km_np
+        self.assertTrue(np.array_equal(args[2], np.array(mock_time_list_min))) # time_matrix_min_np
 
     @patch('route_optimizer.core.distance_matrix.DistanceMatrixBuilder.get_cached_matrix')
-    def test_create_distance_matrix_from_api_with_cache_hit(self, mock_get_cached):
-        """Test API matrix creation with cache hit."""
-        # Mock cached result
-        mock_cached_matrix = np.array([[0.0, 10.0], [10.0, 0.0]])
+    @patch('route_optimizer.core.distance_matrix.DistanceMatrixBuilder._fetch_distance_and_time_matrices')
+    def test_create_distance_matrix_from_api_with_cache_hit(self, mock_fetch_matrices, mock_get_cached):
+        """Test API matrix creation with cache hit (km and minutes)."""
+        mock_cached_dist_km = np.array([[0.0, 10.0], [10.0, 0.0]])   # km
+        mock_cached_time_min = np.array([[0.0, 5.0], [5.0, 0.0]]) # minutes
         mock_cached_ids = ["depot", "customer1"]
-        mock_get_cached.return_value = (mock_cached_matrix, mock_cached_ids)
-        
-        # Call the method
-        matrix, location_ids = DistanceMatrixBuilder.create_distance_matrix_from_api(
-            self.locations[:2],  # Just use two locations
-            api_key='dummy_key',
-            use_cache=True
+        mock_get_cached.return_value = (mock_cached_dist_km, mock_cached_time_min, mock_cached_ids)
+
+        dist_matrix_km, time_matrix_min, loc_ids = DistanceMatrixBuilder.create_distance_matrix_from_api(
+            self.locations[:2], api_key='dummy_key', use_cache=True
         )
-        
-        # Verify the result is from cache
-        self.assertTrue(np.array_equal(matrix, mock_cached_matrix))
-        self.assertEqual(location_ids, mock_cached_ids)
-        
-        # Verify cache was checked
+
+        self.assertTrue(np.array_equal(dist_matrix_km, mock_cached_dist_km))
+        self.assertTrue(np.array_equal(time_matrix_min, mock_cached_time_min))
+        self.assertEqual(loc_ids, mock_cached_ids)
+
         mock_get_cached.assert_called_once()
+        mock_fetch_matrices.assert_not_called() # Should not fetch if cache hits
 
     def test_empty_locations(self):
-        """Test handling of empty locations list."""
-        matrix, location_ids = self.builder.create_distance_matrix([])
-        self.assertEqual(matrix.shape, (0, 0))
+        """Test handling of empty locations list for create_distance_matrix."""
+        dist_matrix, time_matrix, location_ids = self.builder.create_distance_matrix(
+            [], distance_calculation="haversine" # or any other
+        )
+        self.assertEqual(dist_matrix.shape, (0, 0))
+        self.assertIsNotNone(time_matrix) # create_distance_matrix now returns an empty (0,0) array for time
+        self.assertEqual(time_matrix.shape, (0,0))
         self.assertEqual(location_ids, [])
+
+    def test_create_distance_matrix_api_fallback_no_key(self):
+        """Test API fallback to Haversine if no API key is provided."""
+        # We expect it to behave like create_distance_matrix with haversine
+        # and no average_speed_kmh (so time_matrix is None)
+        with patch.object(DistanceMatrixBuilder, 'create_distance_matrix_from_api') as mock_api_call:
+            dist_matrix, time_matrix, loc_ids = self.builder.create_distance_matrix(
+                self.locations,
+                use_api=True, # Try to use API
+                api_key=None  # But no key
+            )
+            # create_distance_matrix_from_api should not even be called IF the outer create_distance_matrix
+            # itself has the "if use_api and api_key:" check.
+            # The current implementation of create_distance_matrix calls create_distance_matrix_from_api
+            # which then has its own fallback if resolved_api_key is None.
+            # Let's test the output assuming the fallback within create_distance_matrix_from_api happens.
+
+        # Based on create_distance_matrix_from_api's fallback:
+        # It calls: DistanceMatrixBuilder.create_distance_matrix(locations, use_haversine=True)
+        # This means average_speed_kmh will be None by default in that internal call.
+        
+        self.assertEqual(dist_matrix.shape, (4, 4))
+        self.assertIsNotNone(time_matrix) # Fallback in create_distance_matrix_from_api will call create_distance_matrix
+                                          # which returns an empty 0x0 time matrix if average_speed_kmh not passed
+                                          # Let's refine this logic: if the fallback occurs inside create_distance_matrix_from_api,
+                                          # it calls create_distance_matrix(locations, use_haversine=True)
+                                          # which by default has average_speed_kmh=None, so time_matrix will be None.
+        
+        # Re-evaluating the fallback logic:
+        # create_distance_matrix_from_api, if resolved_api_key is None, calls:
+        # dist_matrix_fallback_km, time_matrix_fallback_min, loc_ids_fallback = DistanceMatrixBuilder.create_distance_matrix(
+        #                                                         locations, use_haversine=True)
+        # In create_distance_matrix, if average_speed_kmh is None, time_matrix_estimated_min is None.
+        # So, the time_matrix returned from the fallback *should* be None.
+
+        # Let's ensure the test matches this expectation.
+        # We'll directly call create_distance_matrix_from_api with no key to test its fallback.
+        dist_matrix_api_fallback, time_matrix_api_fallback, loc_ids_api_fallback = \
+            DistanceMatrixBuilder.create_distance_matrix_from_api(
+                self.locations, api_key=None, use_cache=False # No key, disable cache for direct test
+            )
+
+        self.assertEqual(dist_matrix_api_fallback.shape, (4, 4))
+        self.assertAlmostEqual(dist_matrix_api_fallback[0, 1], 157.2, delta=1.0) # Haversine
+        self.assertIsNone(time_matrix_api_fallback) # Fallback path in create_distance_matrix_from_api doesn't provide speed
+        self.assertEqual(loc_ids_api_fallback, ["depot", "customer1", "customer2", "customer3"])
+
+    @patch('route_optimizer.core.distance_matrix.DistanceMatrixBuilder._fetch_distance_and_time_matrices', side_effect=Exception("API Call Failed"))
+    def test_create_distance_matrix_api_fallback_on_exception(self, mock_fetch):
+        """Test API fallback to Haversine on general API exception."""
+        dist_matrix_api_fallback, time_matrix_api_fallback, loc_ids_api_fallback = \
+            DistanceMatrixBuilder.create_distance_matrix_from_api(
+                self.locations, api_key="dummy_key", use_cache=False
+            )
+        
+        mock_fetch.assert_called_once() # Ensure API fetch was attempted
+        self.assertEqual(dist_matrix_api_fallback.shape, (4, 4))
+        self.assertAlmostEqual(dist_matrix_api_fallback[0, 1], 157.2, delta=1.0) # Haversine
+        self.assertIsNone(time_matrix_api_fallback) # Fallback path does not estimate time if not specified.
+        self.assertEqual(loc_ids_api_fallback, ["depot", "customer1", "customer2", "customer3"])
 
     def test_distance_matrix_to_graph(self):
         """Test converting distance matrix to graph representation."""
