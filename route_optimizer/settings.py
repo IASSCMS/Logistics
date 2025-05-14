@@ -40,3 +40,13 @@ MAX_RETRIES = 3
 BACKOFF_FACTOR = 2  # Exponential backoff
 RETRY_DELAY_SECONDS = 1
 CACHE_EXPIRY_DAYS = 30
+
+# Cache settings
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache', # For development
+        'LOCATION': 'unique-snowflake',
+    }
+}
+OPTIMIZATION_RESULT_CACHE_TIMEOUT = 3600 # 1 hour
+

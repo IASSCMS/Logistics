@@ -4,16 +4,19 @@ Implementation of route optimization using Google OR-Tools.
 This module provides classes and functions for solving Vehicle Routing Problems
 (VRP) using Google's OR-Tools library.
 """
-from typing import Dict, List, Tuple, Optional, Any
 import logging
 import numpy as np
-from dataclasses import dataclass, field
-from ortools.constraint_solver import routing_enums_pb2
-from ortools.constraint_solver import pywrapcp
 
+from dataclasses import dataclass, field
+from ortools.constraint_solver import pywrapcp, routing_enums_pb2
+from typing import Dict, List, Tuple, Optional, Any
 from route_optimizer.core.constants import CAPACITY_SCALING_FACTOR, DISTANCE_SCALING_FACTOR, MAX_SAFE_DISTANCE, MAX_SAFE_TIME, TIME_SCALING_FACTOR
 from route_optimizer.core.types_1 import Location, OptimizationResult, validate_optimization_result
 from route_optimizer.models import Vehicle, Delivery
+
+MAX_ROUTE_DURATION_UNSCALED = 24 * 60 # e.g., 24 hours in minutes, for dimension capacity
+MAX_ROUTE_DISTANCE_UNSCALED = 5000 # e.g., 5000 km, for dimension capacity
+COST_COEFFICIENT_FOR_LOAD_BALANCE = 100 # Tunable: Higher values prioritize balancing more
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -38,7 +41,8 @@ class ORToolsVRPSolver:
         location_ids: List[str],
         vehicles: List[Vehicle],
         deliveries: List[Delivery],
-        depot_index: int = 0
+        depot_index: int = 0,
+        time_matrix: Optional[np.ndarray] = None
     ) -> OptimizationResult:
         """
         Solve the Vehicle Routing Problem using OR-Tools.
@@ -198,6 +202,59 @@ class ORToolsVRPSolver:
             'Capacity'
         )
         
+        # --- START: Load Balancing Logic ---
+        # Choose dimension for balancing: time if time_matrix is available, otherwise distance.
+        if time_matrix is not None:
+            logger.info("Attempting to balance load by route TTIME.")
+            dimension_name = 'RouteTime'
+            
+            # Create a transit callback for time (travel time only from time_matrix)
+            def time_balance_callback(from_index, to_index):
+                from_node = manager.IndexToNode(from_index)
+                to_node = manager.IndexToNode(to_index)
+                # Assuming time_matrix contains travel times in a unit that needs scaling (e.g., minutes)
+                # Adjust scaling and units as per your time_matrix content.
+                # This example assumes time_matrix values are, e.g., in minutes.
+                raw_time = time_matrix[from_node][to_node]
+                if np.isinf(raw_time) or np.isnan(raw_time):
+                    # Fallback for invalid time values
+                    return int(MAX_ROUTE_DURATION_UNSCALED * TIME_SCALING_FACTOR) # A large, safe time
+                # Scale time for OR-Tools (it prefers integers)
+                return int(raw_time * TIME_SCALING_FACTOR)
+
+            time_balance_transit_callback_index = routing.RegisterTransitCallback(time_balance_callback)
+            
+            routing.AddDimension(
+                time_balance_transit_callback_index,
+                0,  # No slack
+                int(MAX_ROUTE_DURATION_UNSCALED * TIME_SCALING_FACTOR),  # Max total time per vehicle (scaled)
+                True,  # Start cumul to zero
+                dimension_name
+            )
+        else:
+            logger.info("Attempting to balance load by route DISTANCE (time_matrix not provided).")
+            dimension_name = 'RouteDistance'
+            
+            # We can reuse the existing distance_callback logic for consistency if it represents travel cost/effort well.
+            # The distance_callback already returns scaled distances.
+            # Note: transit_callback_index is already defined from the main distance callback for arc costs.
+            # We use the same callback for accumulating distance for balancing.
+            
+            routing.AddDimension(
+                transit_callback_index, # Re-using the main distance callback
+                0,  # No slack
+                int(MAX_ROUTE_DISTANCE_UNSCALED * DISTANCE_SCALING_FACTOR),  # Max total distance per vehicle (scaled)
+                True,  # Start cumul to zero
+                dimension_name
+            )
+
+        balancing_dimension = routing.GetDimensionOrDie(dimension_name)
+        # This makes the solver try to minimize the maximum of the end cumul vars (total time/distance)
+        # for the specified dimension across all vehicles. A higher coefficient prioritizes balancing.
+        balancing_dimension.SetGlobalSpanCostCoefficient(COST_COEFFICIENT_FOR_LOAD_BALANCE)
+        logger.info(f"Set GlobalSpanCostCoefficient on '{dimension_name}' dimension for load balancing with coefficient {COST_COEFFICIENT_FOR_LOAD_BALANCE}.")
+        # --- END: Load Balancing Logic ---
+        
         # Setting first solution heuristic
         search_parameters = pywrapcp.DefaultRoutingSearchParameters()
         search_parameters.first_solution_strategy = (
@@ -213,63 +270,56 @@ class ORToolsVRPSolver:
         
         # Process the solution
         if solution:
-            routes = []
-            total_distance = 0
-            assigned_vehicles = {}
+            routes_list = []
+            total_distance_val = 0 
+            assigned_vehicles_map = {}
             
-            # Extract solution routes
             for vehicle_idx in range(num_vehicles):
-                route = []
+                route_for_vehicle = []
                 index = routing.Start(vehicle_idx)
-                
+                current_route_distance = 0
                 while not routing.IsEnd(index):
                     node_idx = manager.IndexToNode(index)
-                    route.append(location_ids[node_idx])
+                    route_for_vehicle.append(location_ids[node_idx])
                     previous_index = index
                     index = solution.Value(routing.NextVar(index))
-                    total_distance += routing.GetArcCostForVehicle(
+                    # Accumulate distance for this vehicle's route
+                    current_route_distance += routing.GetArcCostForVehicle(
                         previous_index, index, vehicle_idx
-                    ) / DISTANCE_SCALING_FACTOR
+                    )
                 
-                # Add the end location
-                node_idx = manager.IndexToNode(index)
-                route.append(location_ids[node_idx])
+                node_idx = manager.IndexToNode(index) # Add end node
+                route_for_vehicle.append(location_ids[node_idx])
                 
-                if route:  # If the route is not empty
-                    routes.append(route)
-                    assigned_vehicles[vehicles[vehicle_idx].id] = len(routes) - 1
+                # Only add route if it's meaningful (more than just depot to depot if empty, or has actual stops)
+                if len(route_for_vehicle) > 2 or (len(route_for_vehicle) == 2 and route_for_vehicle[0] != route_for_vehicle[1]): 
+                    routes_list.append(route_for_vehicle)
+                    assigned_vehicles_map[vehicles[vehicle_idx].id] = len(routes_list) - 1
+                    total_distance_val += (current_route_distance / DISTANCE_SCALING_FACTOR) # Sum up scaled back distances
             
-            # Check for unassigned deliveries
             delivery_locations = set()
-            for route in routes:
-                delivery_locations.update(route)
+            for r_list in routes_list: 
+                delivery_locations.update(r_list)
             
-            unassigned_deliveries = [
+            unassigned_deliveries_ids = [ 
                 d.id for d in deliveries if d.location_id not in delivery_locations
             ]
             
-            # Create the result object
             result = OptimizationResult(
                 status='success',
-                routes=routes,
-                total_distance=total_distance,
-                total_cost=0.0,  # This will be calculated later
-                assigned_vehicles=assigned_vehicles,
-                unassigned_deliveries=unassigned_deliveries,
-                detailed_routes=[],  # Will be populated later
-                statistics={}  # Will be populated later
+                routes=routes_list, 
+                total_distance=total_distance_val, 
+                total_cost=0.0,
+                assigned_vehicles=assigned_vehicles_map, 
+                unassigned_deliveries=unassigned_deliveries_ids, 
+                detailed_routes=[],
+                statistics={}
             )
         else:
-            # Solution not found
             result = OptimizationResult(
-                status='failed',
-                routes=[],
-                total_distance=0.0,
-                total_cost=0.0,
-                assigned_vehicles={},
-                unassigned_deliveries=[d.id for d in deliveries],
-                detailed_routes=[],
-                statistics={'error': 'No solution found!'}
+                status='failed', routes=[], total_distance=0.0, total_cost=0.0,
+                assigned_vehicles={}, unassigned_deliveries=[d.id for d in deliveries],
+                detailed_routes=[], statistics={'error': 'No solution found!'}
             )
         
         return result
@@ -280,10 +330,10 @@ class ORToolsVRPSolver:
         location_ids: List[str],
         vehicles: List[Vehicle],
         deliveries: List[Delivery],
-        locations: List[Location], # Note: Ensure this 'locations' list is the one with Location objects
+        locations: List[Location], 
         depot_index: int = 0,
         speed_km_per_hour: float = 50.0
-    ) -> OptimizationResult: # CHANGED return type
+    ) -> OptimizationResult: 
         """
         Solve the Vehicle Routing Problem with Time Windows.
 
@@ -312,7 +362,16 @@ class ORToolsVRPSolver:
                 ends.append(end_idx)
             except KeyError as e:
                 logger.error(f"Vehicle location not found in locations: {e}")
-                return {'status': 'failed', 'error': f"Vehicle location not found: {e}"}
+                return OptimizationResult(
+                    status='failed',
+                    routes=[],
+                    total_distance=0.0,
+                    total_cost=0.0,
+                    assigned_vehicles={},
+                    unassigned_deliveries=[d.id for d in deliveries],
+                    detailed_routes=[],
+                    statistics={'error': f"Vehicle location not found: {e}"}
+                )
 
         manager = pywrapcp.RoutingIndexManager(num_locations, num_vehicles, starts, ends)
         routing = pywrapcp.RoutingModel(manager)
@@ -404,25 +463,26 @@ class ORToolsVRPSolver:
         time_dimension = routing.GetDimensionOrDie('Time')
 
         # Add time windows to each location
-        for idx, location_id in enumerate(location_ids):
+        for idx, location_id_iter in enumerate(location_ids):
             loc = location_index_to_location.get(idx)
             if loc and loc.time_window_start is not None and loc.time_window_end is not None:
-                start = loc.time_window_start * TIME_SCALING_FACTOR
-                end = loc.time_window_end * TIME_SCALING_FACTOR
-                index = manager.NodeToIndex(idx)
-                time_dimension.CumulVar(index).SetRange(start, end)
+                # Assuming time_window_start/end are in minutes, and TIME_SCALING_FACTOR converts minutes to seconds
+                start_tw = loc.time_window_start * TIME_SCALING_FACTOR 
+                end_tw = loc.time_window_end * TIME_SCALING_FACTOR
+                node_manager_index = manager.NodeToIndex(idx)
+                time_dimension.CumulVar(node_manager_index).SetRange(start_tw, end_tw)
 
         # Add capacity constraints
         def demand_callback(from_index):
             """Returns the scaled demand for the node."""
             try:
                 from_node = manager.IndexToNode(from_index)
-                location_id = location_ids[from_node]
+                current_location_id = location_ids[from_node]
                 
                 # Find all deliveries at this location
                 total_demand = 0
                 for delivery in deliveries:
-                    if delivery.location_id == location_id:
+                    if delivery.location_id == current_location_id:
                         # Add pickups as negative demand, deliveries as positive
                         demand_value = -delivery.demand if delivery.is_pickup else delivery.demand
                         total_demand += demand_value
@@ -445,6 +505,16 @@ class ORToolsVRPSolver:
             'Capacity'
         )
 
+        # --- START: Load Balancing Logic ---
+        # We will balance based on the existing 'Time' dimension, which includes
+        # travel time, service time, and waiting time.
+        logger.info("Attempting to balance load by total route duration (Time dimension).")
+        # The 'Time' dimension is already created and configured for time windows.
+        # time_dimension = routing.GetDimensionOrDie('Time') # Already fetched above
+        time_dimension.SetGlobalSpanCostCoefficient(COST_COEFFICIENT_FOR_LOAD_BALANCE)
+        logger.info(f"Set GlobalSpanCostCoefficient on 'Time' dimension for load balancing with coefficient {COST_COEFFICIENT_FOR_LOAD_BALANCE}.")
+        # --- END: Load Balancing Logic ---
+        
         # Search parameters
         search_parameters = pywrapcp.DefaultRoutingSearchParameters()
         search_parameters.first_solution_strategy = routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC

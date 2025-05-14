@@ -7,6 +7,7 @@ class VehicleSerializer(serializers.ModelSerializer):
     is_available = serializers.BooleanField(read_only=True)
 
     class Meta:
+        ref_name = 'FleetVehicle'
         model = Vehicle
         fields = [
             'id', 'vehicle_id', 'name', 'capacity', 'status', 'fuel_type',

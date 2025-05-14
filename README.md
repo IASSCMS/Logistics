@@ -100,8 +100,6 @@ http://127.0.0.1:8000/swagger/
 
 You’ll see an interactive **Swagger UI** listing all available API endpoints (e.g., `/api/fleet/vehicles/`).
 
-
-
 ```
 Logistics
 ├─ .pytest_cache
@@ -200,6 +198,7 @@ Logistics
 │  │  ├─ 0001_initial.py
 │  │  └─ __init__.py
 │  ├─ models.py
+│  ├─ README.md
 │  ├─ services
 │  │  ├─ depot_service.py
 │  │  ├─ external_data_service.py
@@ -208,7 +207,6 @@ Logistics
 │  │  ├─ rerouting_service.py
 │  │  ├─ route_stats_service.py
 │  │  ├─ traffic_service.py
-│  │  ├─ vrp_solver.py
 │  │  └─ __init__.py
 │  ├─ settings.py
 │  ├─ tests
