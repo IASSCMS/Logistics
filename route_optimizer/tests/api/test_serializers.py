@@ -425,4 +425,4 @@ class ReroutingRequestSerializerTests(TestCase):
         }
         serializer = ReroutingRequestSerializer(data=data)
         self.assertFalse(serializer.is_valid())
-        self.assertIn("'invalid_type' is not a valid choice.", str(serializer.errors['reroute_type'][0]))
+        self.assertIn('"invalid_type" is not a valid choice.', str(serializer.errors['reroute_type'][0]))

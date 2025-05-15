@@ -159,7 +159,6 @@ class TestDijkstraPathFinder(unittest.TestCase):
         self.assertIsNone(path)
         self.assertIsNone(distance)
 
-
     def test_all_shortest_paths_simple_graph(self):
         """Test calculating all shortest paths between nodes in the simple graph."""
         nodes = ['A', 'B', 'C', 'D', 'E'] 
@@ -209,46 +208,8 @@ class TestDijkstraPathFinder(unittest.TestCase):
         self.assertEqual(all_paths['D']['A']['distance'], 13.0)
         
         # F to D: F -> A (10) -> B (1) -> C (2) -> D (1). Total: 14. Path: [F,A,B,C,D]
-        # Or D->B(1) path from D to F
-        # Path F to D:
-        # F -> A (10) -> B (1) -> C (2) -> D(1) = 14
-        # F -> A (10) -> C (4) -> D(1) = 15
-        # Let's trace path from F to D in complex graph
-        # F -> A (10) dist_A = 10
-        # From A (dist 10):
-        #   A -> B (1) dist_B = 11
-        #   A -> C (4) dist_C = 14
-        # From B (dist 11):
-        #   B -> C (2) dist_C = min(14, 11+2=13)
-        #   B -> D (5) dist_D = 11+5=16  Path: [F,A,B,D]
-        # From C (dist 13):
-        #   C -> D (1) dist_D = min(16, 13+1=14) Path: [F,A,B,C,D]
-        #   C -> E (3) dist_E = 13+3=16
-        # The code for calculate_all_shortest_paths iterates Dijkstra from each start_node in `nodes`.
-        # So, when starting from 'F':
-        # distances = {'A':inf,'D':inf,'F':0}, queue = [(0,F)]
-        # pop (0,F). current=F.
-        #   neighbor A (from F, weight 10): distances['A']=10, previous['A']=F, queue.push((10,A))
-        # pop (10,A). current=A. (dist_A is 10, path F->A)
-        #   neighbor B (from A, weight 1, B is not in `nodes` so it's skipped by `if neighbor not in distances: continue`)
-        #   neighbor C (from A, weight 4, C is not in `nodes` so skipped)
-        # Result for F to D should be inf if B,C,E not in `nodes`.
-        # The current implementation of `calculate_all_shortest_paths` has `distances` keyed by `nodes`.
-        # So neighbors not in `nodes` list are effectively ignored for path calculation.
-        # This means it finds shortest paths *within the subgraph induced by `nodes`*,
-        # but using edges from the full `graph`. This is subtle.
-        # If nodes = ['A', 'D', 'F'], and graph has A-B-D where B is not in nodes, A-B-D won't be found.
-        # The docstring "Paths will be found from each node in this list to every other node in this list."
-        # "The path exploration considers all neighbors available in the main 'graph'"
-        # "but the distance and predecessor tracking is scoped to the nodes specified in the 'nodes' parameter."
-        # This means my manual trace above was not entirely correct for the current code.
-        # If start_node='F', nodes_to_consider = ['A', 'D', 'F']
-        # dist(F,F)=0
-        # dist(F,A)=10, prev(A)=F. Path: [F,A]
-        # dist(F,D)=inf because there are no direct edges F->D and intermediate nodes B,C,E are not in `nodes`.
-        self.assertIsNone(all_paths['F']['D']['path'])
-        self.assertEqual(all_paths['F']['D']['distance'], float('inf'))
-
+        self.assertEqual(all_paths['F']['D']['path'], ['F', 'A', 'B', 'C', 'D'])
+        self.assertEqual(all_paths['F']['D']['distance'], 14.0)
 
     def test_all_shortest_paths_edge_cases(self):
         """Test edge cases for calculate_all_shortest_paths."""

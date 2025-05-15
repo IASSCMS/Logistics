@@ -273,7 +273,6 @@ class TestORToolsVRPSolver(unittest.TestCase):
         )
         self.assertIsInstance(result, OptimizationResult)
         self.assertEqual(result.status, 'failed')
-        self.assertIn('statistics', result)
         self.assertIn('error', result.statistics)
         self.assertIn("Vehicle location not found", result.statistics['error'])
 

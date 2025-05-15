@@ -32,11 +32,25 @@ class TrafficService:
         Calculate the Haversine distance between two locations.
         Returns distance in kilometers.
         """
-        if hasattr(loc1, 'latitude') and hasattr(loc1, 'longitude') and \
-        hasattr(loc2, 'latitude') and hasattr(loc2, 'longitude'):
-            # Assuming _haversine_distance in DistanceMatrixBuilder is static or accessible
-            return DistanceMatrixBuilder._haversine_distance(loc1.latitude, loc1.longitude, loc2.latitude, loc2.longitude)
-        logger.warning(f"Could not calculate Haversine distance between {loc1.id} and {loc2.id} due to missing coordinates.")
+        # Check for attribute existence and ensure coordinates are not None
+        if (hasattr(loc1, 'latitude') and loc1.latitude is not None and
+            hasattr(loc1, 'longitude') and loc1.longitude is not None and
+            hasattr(loc2, 'latitude') and loc2.latitude is not None and
+            hasattr(loc2, 'longitude') and loc2.longitude is not None):
+            
+            # All coordinates are present and not None
+            # Ensure they are explicitly floats before passing to haversine
+            try:
+                lat1_f = float(loc1.latitude)
+                lon1_f = float(loc1.longitude)
+                lat2_f = float(loc2.latitude)
+                lon2_f = float(loc2.longitude)
+                return DistanceMatrixBuilder._haversine_distance(lat1_f, lon1_f, lat2_f, lon2_f)
+            except (ValueError, TypeError):
+                logger.warning(f"Could not convert coordinates to float for Haversine distance between {loc1.id} and {loc2.id}.")
+                return float('inf')
+        
+        logger.warning(f"Could not calculate Haversine distance between {loc1.id} and {loc2.id} due to missing or invalid coordinates.")
         return float('inf')
     
     def create_road_graph(self, locations: List[Location]) -> Dict[str, Any]:

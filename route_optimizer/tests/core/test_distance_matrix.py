@@ -463,23 +463,22 @@ class TestDistanceMatrixBuilder(unittest.TestCase):
                 use_api=True, # Try to use API
                 api_key=None  # But no key
             )
-            # create_distance_matrix_from_api should not even be called IF the outer create_distance_matrix
-            # itself has the "if use_api and api_key:" check.
-            # The current implementation of create_distance_matrix calls create_distance_matrix_from_api
-            # which then has its own fallback if resolved_api_key is None.
-            # Let's test the output assuming the fallback within create_distance_matrix_from_api happens.
+            # Verify that create_distance_matrix_from_api was NOT called due to api_key being None
+            mock_api_call.assert_not_called() 
 
-        # Based on create_distance_matrix_from_api's fallback:
-        # It calls: DistanceMatrixBuilder.create_distance_matrix(locations, use_haversine=True)
-        # This means average_speed_kmh will be None by default in that internal call.
+        # Based on create_distance_matrix executing its non-API path:
+        # It uses Haversine (default) and average_speed_kmh is None.
         
         self.assertEqual(dist_matrix.shape, (4, 4))
-        self.assertIsNotNone(time_matrix) # Fallback in create_distance_matrix_from_api will call create_distance_matrix
-                                          # which returns an empty 0x0 time matrix if average_speed_kmh not passed
-                                          # Let's refine this logic: if the fallback occurs inside create_distance_matrix_from_api,
-                                          # it calls create_distance_matrix(locations, use_haversine=True)
-                                          # which by default has average_speed_kmh=None, so time_matrix will be None.
+        # time_matrix should be None because api_key was None (so API path not taken)
+        # and average_speed_kmh was None (so local time estimation not done).
+        self.assertIsNone(time_matrix) # Changed from assertIsNotNone
         
+        # Check if Haversine distance was calculated as expected for the non-API path
+        self.assertAlmostEqual(dist_matrix[0, 1], 157.2, delta=1.0) 
+        self.assertEqual(loc_ids, ["depot", "customer1", "customer2", "customer3"])
+
+        # The rest of the test (directly testing create_distance_matrix_from_api's fallback) remains valid:
         # Re-evaluating the fallback logic:
         # create_distance_matrix_from_api, if resolved_api_key is None, calls:
         # dist_matrix_fallback_km, time_matrix_fallback_min, loc_ids_fallback = DistanceMatrixBuilder.create_distance_matrix(

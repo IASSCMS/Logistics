@@ -111,103 +111,119 @@ class DijkstraPathFinder:
     @staticmethod
     def calculate_all_shortest_paths(
         graph: Dict[str, Dict[str, float]],
-        nodes: List[str]
+        nodes_subset: List[str]  # Renamed for clarity
     ) -> Dict[str, Dict[str, Dict[str, Union[List[str], float]]]]:
         """
         Calculate shortest paths between all pairs of specified nodes using Dijkstra.
 
-        This method runs Dijkstra's algorithm starting from each node in the 'nodes'
-        list to find the shortest paths to all other nodes in the 'nodes' list.
-        The path exploration considers all neighbors available in the main 'graph',
-        but the distance and predecessor tracking is scoped to the nodes specified
-        in the 'nodes' parameter.
+        This method runs Dijkstra's algorithm starting from each node in the 'nodes_subset'
+        list to find the shortest paths to all other nodes in the 'nodes_subset' list.
+        The path exploration considers all neighbors and intermediate nodes available 
+        in the main 'graph'.
 
         Args:
-            graph: The graph as an adjacency list (dictionary of dictionaries with weights).
-                   Example: {'A': {'B': 1, 'C': 4}, 'B': {'A': 1, 'C': 2}}
-            nodes: A list of node IDs for which all-pairs shortest paths are to be calculated.
-                   Paths will be found from each node in this list to every other node
-                   in this list.
+            graph: The graph as an adjacency list.
+            nodes_subset: A list of node IDs for which all-pairs shortest paths are calculated.
 
         Returns:
-            A dictionary where keys are start nodes. Each start node maps to another
-            dictionary where keys are end nodes. This inner dictionary contains 'path'
-            (a list of nodes) and 'distance' (a float).
-            Example:
-            {
-                'A': {
-                    'B': {'path': ['A', 'B'], 'distance': 1.0},
-                    'C': {'path': ['A', 'B', 'C'], 'distance': 3.0}
-                },
-                'B': { ... }
-            }
-            If a path does not exist between two nodes, 'path' will be None and
-            'distance' will be float('inf').
+            A dictionary structured as {start_node: {end_node: {'path': [], 'distance': 0.0}}}.
+            If a path does not exist, 'path' is None and 'distance' is float('inf').
         """
         DijkstraPathFinder._validate_non_negative_weights(graph)
         result = {}
 
-        for start_node in nodes:
-            # Initialize distances and previous nodes for the current start_node,
-            # considering only the nodes specified in the 'nodes' list for these data structures.
-            distances = {node: float('inf') for node in nodes}
-            previous = {node: None for node in nodes}
-            
-            if start_node not in graph: # If start_node itself isn't in the main graph
-                result[start_node] = {end_node: {'path': None, 'distance': float('inf')} for end_node in nodes}
-                if start_node in nodes: # if it was a target node for itself
-                     result[start_node][start_node] = {'path': [start_node] if start_node in graph else None, 'distance': 0.0 if start_node in graph else float('inf')}
+        # Pre-initialize the result structure for all pairs in nodes_subset
+        for s_node in nodes_subset:
+            result[s_node] = {}
+            for e_node in nodes_subset:
+                if s_node == e_node:
+                    # Path to self is 0 if node is in graph, otherwise inf
+                    result[s_node][e_node] = {
+                        'path': [s_node] if s_node in graph else None,
+                        'distance': 0.0 if s_node in graph else float('inf')
+                    }
+                else:
+                    result[s_node][e_node] = {'path': None, 'distance': float('inf')}
+
+        for start_node in nodes_subset:
+            if start_node not in graph:
+                # If start_node is not in the graph, all paths from it remain None/inf
+                # (already handled by pre-initialization for pairs involving this start_node)
                 continue
 
-            distances[start_node] = 0
-            queue = [(0, start_node)] # Priority queue: (distance, node)
+            # Dijkstra's from start_node to ALL nodes in the full graph
+            # These dictionaries are for the current Dijkstra run, keyed by all nodes in the graph
+            current_run_distances = {node_in_graph: float('inf') for node_in_graph in graph}
+            current_run_previous = {node_in_graph: None for node_in_graph in graph}
+            
+            current_run_distances[start_node] = 0
+            priority_queue = [(0, start_node)]  # (distance, node_in_graph)
+            
+            processed_nodes_in_run = set()
 
-            while queue:
-                dist, current = heapq.heappop(queue)
+            while priority_queue:
+                dist, current_g_node = heapq.heappop(priority_queue)
 
-                # Optimization: If we've found a shorter path to 'current' already
-                # after this entry was added to the queue, skip processing this stale entry.
-                if dist > distances[current]:
+                if current_g_node in processed_nodes_in_run:
+                    continue
+                processed_nodes_in_run.add(current_g_node)
+
+                # Optimization: if a shorter path to current_g_node was found after this entry was queued
+                if dist > current_run_distances[current_g_node]:
                     continue
 
-                # Explore neighbors from the main 'graph' definition
-                for neighbor, weight in graph.get(current, {}).items():
-                    # Only consider neighbors that are part of the specified 'nodes' list
-                    # for distance updates and path construction.
-                    if neighbor not in distances: 
+                for neighbor_g, weight in graph.get(current_g_node, {}).items():
+                    # neighbor_g must be in the graph for a valid edge
+                    if neighbor_g not in graph: # Should not happen if graph is well-formed
+                        logger.warning(f"Neighbor {neighbor_g} of {current_g_node} not found in graph keys.")
                         continue
 
-                    alt = dist + weight
-                    if alt < distances[neighbor]:
-                        distances[neighbor] = alt
-                        previous[neighbor] = current
-                        heapq.heappush(queue, (alt, neighbor))
-
-            # Store results for the current start_node
-            result[start_node] = {}
-            for end_node in nodes:
-                if distances[end_node] == float('inf'):
-                    result[start_node][end_node] = {'path': None, 'distance': float('inf')}
+                    alt_dist = dist + weight
+                    if alt_dist < current_run_distances[neighbor_g]:
+                        current_run_distances[neighbor_g] = alt_dist
+                        current_run_previous[neighbor_g] = current_g_node
+                        heapq.heappush(priority_queue, (alt_dist, neighbor_g))
+            
+            # After Dijkstra from start_node, populate results for relevant end_nodes
+            for end_node in nodes_subset:
+                if end_node not in graph: # Target end_node not in graph
+                    # result[start_node][end_node] already initialized to None/inf
                     continue
 
+                final_dist_to_end_node = current_run_distances.get(end_node, float('inf'))
+
+                if final_dist_to_end_node == float('inf'):
+                    # Path to self was pre-initialized; other non-existent paths also pre-initialized
+                    if start_node == end_node and start_node in graph: # ensure path to self is correctly 0 if node in graph
+                         result[start_node][end_node] = {'path': [start_node], 'distance': 0.0}
+                    else:
+                        result[start_node][end_node] = {'path': None, 'distance': float('inf')}
+                    continue
+
+                # Reconstruct path
                 path = []
-                curr_path_node = end_node
-                while curr_path_node is not None:
-                    path.insert(0, curr_path_node)
-                    curr_path_node = previous[curr_path_node]
+                path_tracer_node = end_node
+                while path_tracer_node is not None:
+                    path.insert(0, path_tracer_node)
+                    if path_tracer_node == start_node: # Reached the start of the path
+                        break
+                    
+                    predecessor = current_run_previous.get(path_tracer_node)
+                    if predecessor is None and path_tracer_node != start_node:
+                        # Should not happen if final_dist_to_end_node is not 'inf'
+                        logger.error(f"Path reconstruction error: No predecessor for {path_tracer_node} "
+                                     f"from {start_node} to {end_node}.")
+                        path = [] # Invalidate path
+                        break
+                    path_tracer_node = predecessor
                 
-                # Ensure the reconstructed path actually starts with start_node if a path was found
-                if path and path[0] == start_node:
-                    result[start_node][end_node] = {
-                        'path': path,
-                        'distance': distances[end_node]
-                    }
-                elif start_node == end_node and distances[end_node] == 0: # Path to self
-                     result[start_node][end_node] = {'path': [start_node], 'distance': 0.0}
-                else: # Path reconstruction failed or inconsistent
+                # Validate reconstructed path
+                if path and path[0] == start_node and (len(path) == 1 or path[-1] == end_node) :
+                    result[start_node][end_node] = {'path': path, 'distance': final_dist_to_end_node}
+                elif start_node == end_node and final_dist_to_end_node == 0: # Correct path to self
+                    result[start_node][end_node] = {'path': [start_node], 'distance': 0.0}
+                else: # Path reconstruction failed or other inconsistency
+                    logger.warning(f"Path reconstruction to {end_node} from {start_node} resulted in inconsistent path: {path} "
+                                   f"with distance {final_dist_to_end_node}. Setting to None/inf.")
                     result[start_node][end_node] = {'path': None, 'distance': float('inf')}
-                    if start_node == end_node : # Special case for self-path if start_node not in graph but in nodes
-                         result[start_node][end_node] = {'path': None, 'distance': float('inf')}
-
-
         return result

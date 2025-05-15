@@ -417,24 +417,32 @@ class OptimizeRoutesView(APIView):
                 "status": result_dto.status,
                 "total_distance": result_dto.total_distance,
                 "total_cost": result_dto.total_cost,
-                "routes": result_dto.detailed_routes, # Map DTO's detailed_routes to serializer's routes
+                "routes": result_dto.detailed_routes,
                 "unassigned_deliveries": result_dto.unassigned_deliveries,
                 "statistics": result_dto.statistics
             }
             response_serializer = RouteOptimizationResponseSerializer(data=response_data)
-            if not response_serializer.is_valid(): # Should be valid if DTO is correct
+            
+            if not response_serializer.is_valid():
                 logger.error(f"OptimizeRoutesView response serialization error: {response_serializer.errors}")
                 return Response(response_serializer.errors, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-            return Response(response_serializer.data, status=status.HTTP_200_OK)
+            http_status_to_return = status.HTTP_200_OK
+            if result_dto.status != 'success':
+                # If the service indicates an error or failure (e.g., invalid inputs like no locations,
+                # or no solution found), it's often a client-side correctable issue.
+                http_status_to_return = status.HTTP_400_BAD_REQUEST
+                # You might want more granular control, e.g., specific errors from service mapping to 500.
+                # For now, non-success from service DTO implies a 400.
+            
+            return Response(response_serializer.data, status=http_status_to_return)
 
-        except Exception as e:
+        except Exception as e: # This catches unexpected server errors
             logger.exception("Error during new route optimization: %s", str(e))
             return Response(
                 {"error": f"Optimization failed: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-
 
 class RerouteView(APIView):
     """API view for rerouting vehicles based on real-time events."""

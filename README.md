@@ -210,20 +210,30 @@ Logistics
 │  │  └─ __init__.py
 │  ├─ settings.py
 │  ├─ tests
+│  │  ├─ api
+│  │  │  ├─ test_serializers.py
+│  │  │  └─ test_views.py
 │  │  ├─ conftest.py
 │  │  ├─ core
 │  │  │  ├─ test_dijkstra.py
 │  │  │  ├─ test_distance_matrix.py
 │  │  │  ├─ test_ortools_optimizer.py
+│  │  │  ├─ test_types.py
 │  │  │  └─ __init__.py
 │  │  ├─ services
 │  │  │  ├─ test_depot_service.py
+│  │  │  ├─ test_external_data_service.py
 │  │  │  ├─ test_optimization_service.py
 │  │  │  ├─ test_path_annotation_service.py
+│  │  │  ├─ test_rerouting_service.py
 │  │  │  ├─ test_route_stats_service.py
 │  │  │  ├─ test_traffic_service.py
 │  │  │  └─ __init__.py
+│  │  ├─ test_models.py
 │  │  ├─ test_settings.py
+│  │  ├─ utils
+│  │  │  ├─ test_env_loader.py
+│  │  │  └─ test_helpers.py
 │  │  └─ __init__.py
 │  ├─ utils
 │  │  ├─ env_loader.py

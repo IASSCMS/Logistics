@@ -12,8 +12,8 @@ class OptimizeRoutesViewTests(APITestCase):
         self.optimize_url = reverse('optimize_routes_create') # Matches operation_id in OptimizeRoutesView
 
         # Sample data for requests
-        self.location_data1 = {"id": "depot", "latitude": 34.0522, "longitude": -118.2437, "is_depot": True}
-        self.location_data2 = {"id": "customer1", "latitude": 34.0523, "longitude": -118.2438}
+        self.location_data1 = {"id": "depot", "name": "Depot XYZ", "latitude": 34.0522, "longitude": -118.2437, "is_depot": True}
+        self.location_data2 = {"id": "customer1", "name": "Customer Alpha", "latitude": 34.0523, "longitude": -118.2438}
         self.vehicle_data1 = {"id": "vehicle1", "capacity": 100.0, "start_location_id": "depot"}
         self.delivery_data1 = {"id": "delivery1", "location_id": "customer1", "demand": 10.0}
 
@@ -102,11 +102,19 @@ class OptimizeRoutesViewTests(APITestCase):
         self.assertEqual(kwargs['traffic_data'], expected_traffic_service_data)
 
     def test_optimize_routes_invalid_input(self):
-        invalid_data = {"locations": [], "vehicles": [], "deliveries": []} # Missing required fields per serializer
+        invalid_data = {"locations": [], "vehicles": [], "deliveries": []} 
         response = self.client.post(self.optimize_url, invalid_data, format='json')
+        
+        # Check that the view returned HTTP 400
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        # Example check, specific errors depend on serializer validation
-        self.assertIn('locations', response.data) 
+        
+        # Check the content of the response data
+        # The service should have returned an OptimizationResult DTO with status='error'
+        self.assertEqual(response.data['status'], 'error')
+        self.assertIn('statistics', response.data)
+        self.assertIn('error', response.data['statistics'])
+        # Check for the specific error message from the OptimizationService
+        self.assertIn("Optimization failed: No locations provided", response.data['statistics']['error'])
 
     @patch('route_optimizer.api.views.OptimizationService.optimize_routes')
     def test_optimize_routes_service_exception(self, mock_optimize_routes):
@@ -140,9 +148,9 @@ class RerouteViewTests(APITestCase):
         self.client = APIClient()
         self.reroute_url = reverse('reroute_vehicles_update') # Matches operation_id in RerouteView
 
-        self.location_data1 = {"id": "depot", "latitude": 34.0522, "longitude": -118.2437, "is_depot": True}
-        self.location_data2 = {"id": "customer1", "latitude": 34.0523, "longitude": -118.2438}
-        self.location_data3 = {"id": "customer2", "latitude": 34.0524, "longitude": -118.2439}
+        self.location_data1 = {"id": "depot", "name": "Main Depot", "latitude": 34.0522, "longitude": -118.2437, "is_depot": True}
+        self.location_data2 = {"id": "customer1", "name": "Client One", "latitude": 34.0523, "longitude": -118.2438}
+        self.location_data3 = {"id": "customer2", "name": "Client Two", "latitude": 34.0524, "longitude": -118.2439}
         
         self.vehicle_data1 = {"id": "vehicle1", "capacity": 100.0, "start_location_id": "depot"}
         
