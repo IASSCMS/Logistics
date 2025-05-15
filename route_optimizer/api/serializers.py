@@ -182,7 +182,10 @@ class OptimizationResultSerializer(serializers.Serializer):
             # validate_optimization_result expects a dictionary
             validate_optimization_result(data_to_validate)
         except ValueError as e:
-            raise serializers.ValidationError(str(e))
+            # Log the detailed error for internal review
+            logger.error(f"Validation error in OptimizationResult data: {str(e)}", exc_info=True)
+            # Raise a generic validation error to the client
+            raise serializers.ValidationError("Invalid optimization result structure. Please ensure the data conforms to the required format.")     
         
         # The .validate() method must return the validated data (the original 'data' argument)
         return data

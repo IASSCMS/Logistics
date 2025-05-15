@@ -149,10 +149,10 @@ class OptimizeRoutesView(APIView):
 
             return Response(response_serializer.data, status=status.HTTP_200_OK)
 
-        except Exception as e:
-            logger.exception("Error during new route optimization: %s", str(e))
+        except Exception as e: # This catches unexpected server errors
+            logger.exception("Critical error during new route optimization: %s", str(e)) # Logger already captures the full str(e) and stack trace
             return Response(
-                {"error": f"Optimization failed: {str(e)}"},
+                {"error": "An unexpected error occurred during route optimization. Please try again later."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -289,14 +289,14 @@ class RerouteView(APIView):
                 logger.error("Rerouting did not produce a result DTO for an unknown reason.")
                 return Response({"error": "Invalid reroute type or no result obtained from rerouting service."}, status=status.HTTP_400_BAD_REQUEST)
             
+        # Suggested change:
         except Exception as e:
-            logger.exception("Error during rerouting: %s", str(e))
+            logger.exception("Critical error during rerouting: %s", str(e)) # Logger already captures the full str(e) and stack trace
             return Response(
-                {"error": f"Rerouting failed: {str(e)}"},
+                {"error": "An unexpected error occurred during rerouting. Please try again later."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-# M:\Documents\B-Airways\Logistics\route_optimizer\api\views.py
 """
 API views for the route optimizer.
 """
@@ -438,9 +438,9 @@ class OptimizeRoutesView(APIView):
             return Response(response_serializer.data, status=http_status_to_return)
 
         except Exception as e: # This catches unexpected server errors
-            logger.exception("Error during new route optimization: %s", str(e))
+            logger.exception("Critical error during new route optimization: %s", str(e)) # Logger already captures the full str(e) and stack trace
             return Response(
-                {"error": f"Optimization failed: {str(e)}"},
+                {"error": "An unexpected error occurred during route optimization. Please try again later."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -562,10 +562,11 @@ class RerouteView(APIView):
                 logger.error("Rerouting did not produce a result DTO for an unknown reason.")
                 return Response({"error": "Invalid reroute type or no result obtained from rerouting service."}, status=status.HTTP_400_BAD_REQUEST)
             
+        # Suggested change:
         except Exception as e:
-            logger.exception("Error during rerouting: %s", str(e))
+            logger.exception("Critical error during rerouting: %s", str(e)) # Logger already captures the full str(e) and stack trace
             return Response(
-                {"error": f"Rerouting failed: {str(e)}"},
+                {"error": "An unexpected error occurred during rerouting. Please try again later."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 

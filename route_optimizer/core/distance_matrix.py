@@ -280,9 +280,10 @@ class DistanceMatrixBuilder:
                     time_row_min.append(time_val_seconds / 60.0)  # Convert seconds to minutes
                 else:
                     # For unreachable destinations or errors, use defined safe maximum values
-                    status_msg = element.get('status', 'UNKNOWN_ERROR')
+                    element_status_code = element.get('status', 'UNKNOWN_API_ELEMENT_STATUS')
+                    # Avoid logging potentially verbose error messages from element.get('error_message') directly in this warning if present.
                     logger.warning(
-                        f"API element status not OK: '{status_msg}'. Using MAX_SAFE_DISTANCE and MAX_SAFE_TIME."
+                        f"Google Maps API element status for a specific origin-destination pair was '{element_status_code}'. Using fallback values (MAX_SAFE_DISTANCE, MAX_SAFE_TIME) for this element."
                     )
                     dist_row_km.append(MAX_SAFE_DISTANCE)  # MAX_SAFE_DISTANCE is in km
                     time_row_min.append(MAX_SAFE_TIME)     # MAX_SAFE_TIME should be in minutes
@@ -494,8 +495,16 @@ class DistanceMatrixBuilder:
                 
                 # Check if the API returned an error
                 if response.get('status') != 'OK':
-                    error_message = response.get('error_message', 'Unknown API error')
-                    logger.warning(f"API error: {error_message}")
+                    api_status_code = response.get('status', 'UNKNOWN_API_STATUS')
+                    # Store the original error message for potential internal use or more specific exception raising
+                    error_message_content = response.get('error_message', 'Unknown API error')
+                        
+                    # Log a more generic warning, avoiding direct inclusion of potentially sensitive error_message_content.
+                    logger.warning(
+                        f"Google Maps API request returned non-OK status: '{api_status_code}'. "
+                        f"Refer to API documentation or console for details on this status. "
+                        f"Proceeding with appropriate retry or fallback logic."
+                    )
                     
                     # If OVER_QUERY_LIMIT, use backoff strategy
                     if response.get('status') == 'OVER_QUERY_LIMIT':
