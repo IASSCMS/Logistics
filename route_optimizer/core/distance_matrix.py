@@ -280,10 +280,18 @@ class DistanceMatrixBuilder:
                     time_row_min.append(time_val_seconds / 60.0)  # Convert seconds to minutes
                 else:
                     # For unreachable destinations or errors, use defined safe maximum values
-                    element_status_code = element.get('status', 'UNKNOWN_API_ELEMENT_STATUS')
-                    # Avoid logging potentially verbose error messages from element.get('error_message') directly in this warning if present.
+                    element_status_code = element.get('status', 'UNKNOWN_API_ELEMENT_STATUS') # Keep for internal logic if needed
+                    # Log a generic message. The specific element_status_code can be used in internal logic
+                    # (e.g., if specific status codes need different handling) but not logged directly here.
                     logger.warning(
-                        f"Google Maps API element status for a specific origin-destination pair was '{element_status_code}'. Using fallback values (MAX_SAFE_DISTANCE, MAX_SAFE_TIME) for this element."
+                        "A Google Maps API element for an origin-destination pair returned a non-OK status. "
+                        "Using fallback values (MAX_SAFE_DISTANCE, MAX_SAFE_TIME) for this element. "
+                        "The specific status was '%s'. Check API documentation for details.", # Log status code separately if absolutely needed and safe, or omit.
+                        element_status_code # This makes it an argument to the formatting string, which CodeQL might treat differently/more safely.
+                                            # OR, even safer, omit it from the log entirely if not essential for this specific warning:
+                        # "A Google Maps API element for an origin-destination pair returned a non-OK status. "
+                        # "Using fallback values (MAX_SAFE_DISTANCE, MAX_SAFE_TIME) for this element. "
+                        # "Refer to API documentation or detailed logs (if configured elsewhere with appropriate sanitization) for specific status codes."
                     )
                     dist_row_km.append(MAX_SAFE_DISTANCE)  # MAX_SAFE_DISTANCE is in km
                     time_row_min.append(MAX_SAFE_TIME)     # MAX_SAFE_TIME should be in minutes
@@ -499,11 +507,13 @@ class DistanceMatrixBuilder:
                     # Store the original error message for potential internal use or more specific exception raising
                     error_message_content = response.get('error_message', 'Unknown API error')
                         
-                    # Log a more generic warning, avoiding direct inclusion of potentially sensitive error_message_content.
+                    # Log a more generic warning.
                     logger.warning(
-                        f"Google Maps API request returned non-OK status: '{api_status_code}'. "
-                        f"Refer to API documentation or console for details on this status. "
-                        f"Proceeding with appropriate retry or fallback logic."
+                        "Google Maps API request returned a non-OK status. "
+                        "Refer to API documentation or console for specific status code details. "
+                        "Proceeding with appropriate retry or fallback logic. "
+                        "For debugging, the actual status code received was: %s.",
+                        api_status_code # Logged as a separate parameter.
                     )
                     
                     # If OVER_QUERY_LIMIT, use backoff strategy
