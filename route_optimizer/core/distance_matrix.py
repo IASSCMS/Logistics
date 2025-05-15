@@ -518,7 +518,7 @@ class DistanceMatrixBuilder:
                         continue
                     
                     # For other errors, raise exception to trigger fallback
-                    raise Exception(f"Google Maps API error: {error_message}")
+                    raise Exception(f"Google Maps API error: {error_message_content}")
                 
                 # If we got here, the request was successful
                 return response
