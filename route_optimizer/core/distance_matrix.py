@@ -284,14 +284,9 @@ class DistanceMatrixBuilder:
                     # Log a generic message. The specific element_status_code can be used in internal logic
                     # (e.g., if specific status codes need different handling) but not logged directly here.
                     logger.warning(
-                        "A Google Maps API element for an origin-destination pair returned a non-OK status. "
-                        "Using fallback values (MAX_SAFE_DISTANCE, MAX_SAFE_TIME) for this element. "
-                        "The specific status was '%s'. Check API documentation for details.", # Log status code separately if absolutely needed and safe, or omit.
-                        element_status_code # This makes it an argument to the formatting string, which CodeQL might treat differently/more safely.
-                                            # OR, even safer, omit it from the log entirely if not essential for this specific warning:
-                        # "A Google Maps API element for an origin-destination pair returned a non-OK status. "
-                        # "Using fallback values (MAX_SAFE_DISTANCE, MAX_SAFE_TIME) for this element. "
-                        # "Refer to API documentation or detailed logs (if configured elsewhere with appropriate sanitization) for specific status codes."
+                        "Google Maps API element status for a specific origin-destination pair was not 'OK'. "
+                        "Fallback values (MAX_SAFE_DISTANCE, MAX_SAFE_TIME) will be used for this element. "
+                        "Refer to Google Maps API documentation for status code meanings."
                     )
                     dist_row_km.append(MAX_SAFE_DISTANCE)  # MAX_SAFE_DISTANCE is in km
                     time_row_min.append(MAX_SAFE_TIME)     # MAX_SAFE_TIME should be in minutes
@@ -511,9 +506,7 @@ class DistanceMatrixBuilder:
                     logger.warning(
                         "Google Maps API request returned a non-OK status. "
                         "Refer to API documentation or console for specific status code details. "
-                        "Proceeding with appropriate retry or fallback logic. "
-                        "For debugging, the actual status code received was: %s.",
-                        api_status_code # Logged as a separate parameter.
+                        "Proceeding with appropriate retry or fallback logic."
                     )
                     
                     # If OVER_QUERY_LIMIT, use backoff strategy
