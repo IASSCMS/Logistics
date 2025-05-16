@@ -123,7 +123,8 @@ class OptimizeRoutesViewTests(APITestCase):
         response = self.client.post(self.optimize_url, self.valid_request_data, format='json')
         self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
         self.assertIn('error', response.data)
-        self.assertEqual(response.data['error'], "Optimization failed: Service exploded")
+        # Update to the new generic error message
+        self.assertEqual(response.data['error'], "An unexpected error occurred during route optimization. Please try again later.")
 
     @patch('route_optimizer.api.views.OptimizationService.optimize_routes')
     def test_optimize_routes_response_serializer_invalid(self, mock_optimize_routes):
@@ -261,7 +262,9 @@ class RerouteViewTests(APITestCase):
         request_data = {**self.base_reroute_request_data, "reroute_type": "traffic"}
         response = self.client.post(self.reroute_url, request_data, format='json')
         self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
-        self.assertEqual(response.data['error'], "Rerouting failed: Rerouting service crashed")
+        self.assertIn('error', response.data) # Ensure 'error' key is present
+        # Update to the new generic error message
+        self.assertEqual(response.data['error'], "An unexpected error occurred during rerouting. Please try again later.")
 
     @patch('route_optimizer.api.views.ReroutingService.reroute_for_traffic')
     def test_reroute_service_returns_none(self, mock_reroute_for_traffic):

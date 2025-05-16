@@ -281,7 +281,9 @@ class OptimizationResultSerializerTests(TestCase):
     def test_invalid_optimization_result_core_validation_fails(self, mock_validate):
         mock_validate.side_effect = ValueError("Core validation failed")
         serializer = OptimizationResultSerializer(data=self.valid_data_dict)
-        with self.assertRaisesMessage(serializers.ValidationError, "Core validation failed"):
+        # The actual error message is now the generic one from the serializer's except block
+        expected_message = "Invalid optimization result structure. Please ensure the data conforms to the required format."
+        with self.assertRaisesMessage(serializers.ValidationError, expected_message):
             serializer.is_valid(raise_exception=True)
         mock_validate.assert_called_once_with(self.valid_data_dict)
 
