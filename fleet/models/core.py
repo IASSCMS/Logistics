@@ -28,6 +28,15 @@ class Vehicle(models.Model):
     plate_number = models.CharField(max_length=20, blank=True)
     year_of_manufacture = models.PositiveIntegerField(null=True, blank=True)
 
+    # Depot
+    depot_id = models.CharField(
+        max_length=64,
+        null=True,
+        blank=True,
+        help_text="External ID of the depot this vehicle is assigned to"
+    )
+    depot_latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    depot_longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     # Location tracking
     current_latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     current_longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)

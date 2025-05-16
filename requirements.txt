@@ -1,6 +1,8 @@
 absl-py==2.2.2
 asgiref==3.8.1
+confluent-kafka==2.10.0
 Django==5.2
+django-cors-headers==4.7.0
 django-filter==25.1
 djangorestframework==3.16.0
 drf-yasg==1.21.10
@@ -15,10 +17,10 @@ pluggy==1.5.0
 protobuf==5.29.4
 pytest==8.3.5
 python-dateutil==2.9.0.post0
+python-dotenv==1.1.0
 pytz==2025.2
 PyYAML==6.0.2
 six==1.17.0
 sqlparse==0.5.3
 tzdata==2025.2
 uritemplate==4.1.1
-confluent-kafka~=2.10.0

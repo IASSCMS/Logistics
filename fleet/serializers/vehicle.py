@@ -10,13 +10,29 @@ class VehicleSerializer(serializers.ModelSerializer):
         ref_name = 'FleetVehicle'
         model = Vehicle
         fields = [
-            'id', 'vehicle_id', 'name', 'capacity', 'status', 'fuel_type',
-            'plate_number', 'year_of_manufacture', 'current_latitude',
-            'current_longitude', 'last_location_update', 'max_speed',
-            'fuel_efficiency', 'created_at', 'updated_at', 'is_available',
+            'id',
+            'vehicle_id',
+            'name',
+            'capacity',
+            'status',
+            'fuel_type',
+            'plate_number',
+            'year_of_manufacture',
+            'depot_id',
+            'depot_latitude',
+            'depot_longitude',
+            'current_latitude',
+            'current_longitude',
+            'last_location_update',
+            'max_speed',
+            'fuel_efficiency',
+            'created_at',
+            'updated_at',
+            'is_available',
             'location_is_stale'
         ]
         read_only_fields = ['created_at', 'updated_at', 'last_location_update']
+
 
 class VehicleLocationSerializer(serializers.ModelSerializer):
     class Meta:

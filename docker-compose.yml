@@ -1,4 +1,5 @@
 version: '3.8'
+
 services:
   zookeeper:
     image: confluentinc/cp-zookeeper:7.4.0
@@ -14,5 +15,19 @@ services:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    depends_on:
+      - zookeeper
+
+  logistics-service:
+    build: .
+    container_name: logistics-service
+    ports:
+      - "${LOGISTICS_SERVICE_PORT:-8002}:8000"
+    environment:
+      - DJANGO_PORT=8000
+      - KAFKA_BROKER_URL=kafka:9092
+    env_file: .env
+    depends_on:
+      - kafka

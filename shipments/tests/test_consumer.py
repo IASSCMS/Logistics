@@ -5,24 +5,25 @@ from shipments.consumers.order_events import handle_order_created
 
 class KafkaConsumerRobustTest(TestCase):
     def test_valid_order_event_creates_shipment(self):
-        """A valid event should create a shipment."""
         event = {
             "order_id": "ORD001",
-            "origin_warehouse_id": "WH1",
-            "destination_warehouse_id": "WH2"
+            "origin": {"lat": 6.9271, "lng": 79.8612},
+            "destination": {"lat": 7.2906, "lng": 80.6337},
+            "demand": 25
         }
         handle_order_created(event)
 
         shipment = Shipment.objects.get(order_id="ORD001")
         self.assertEqual(shipment.status, "pending")
-        self.assertEqual(shipment.origin_warehouse_id, "WH1")
-        self.assertEqual(shipment.destination_warehouse_id, "WH2")
+        self.assertEqual(shipment.origin, event["origin"])
+        self.assertEqual(shipment.destination, event["destination"])
+        self.assertEqual(shipment.demand, 25)
 
     def test_missing_order_id_does_not_create_shipment(self):
-        """Missing order_id should skip creation."""
         event = {
-            "origin_warehouse_id": "WH1",
-            "destination_warehouse_id": "WH2"
+            "origin": {"lat": 6.9271, "lng": 79.8612},
+            "destination": {"lat": 7.2906, "lng": 80.6337},
+            "demand": 10
         }
         handle_order_created(event)
         self.assertEqual(Shipment.objects.count(), 0)
@@ -30,7 +31,8 @@ class KafkaConsumerRobustTest(TestCase):
     def test_missing_origin_does_not_create_shipment(self):
         event = {
             "order_id": "ORD002",
-            "destination_warehouse_id": "WH2"
+            "destination": {"lat": 7.2906, "lng": 80.6337},
+            "demand": 10
         }
         handle_order_created(event)
         self.assertEqual(Shipment.objects.count(), 0)
@@ -38,55 +40,77 @@ class KafkaConsumerRobustTest(TestCase):
     def test_missing_destination_does_not_create_shipment(self):
         event = {
             "order_id": "ORD003",
-            "origin_warehouse_id": "WH1"
+            "origin": {"lat": 6.9271, "lng": 79.8612},
+            "demand": 10
         }
         handle_order_created(event)
         self.assertEqual(Shipment.objects.count(), 0)
 
-    def test_invalid_data_type_ignored(self):
-        """If order_id is not a string, the handler should not crash."""
+    def test_invalid_data_type_for_order_id_is_casted(self):
         event = {
             "order_id": 12345,
-            "origin_warehouse_id": "WH1",
-            "destination_warehouse_id": "WH2"
+            "origin": {"lat": 6.9, "lng": 79.8},
+            "destination": {"lat": 7.3, "lng": 80.6},
+            "demand": 40
         }
         handle_order_created(event)
-        self.assertEqual(Shipment.objects.filter(order_id=12345).count(), 1)
+        self.assertTrue(Shipment.objects.filter(order_id=str(12345)).exists())
 
-    def test_duplicate_order_id_creates_separate_shipments(self):
-        """If shipment_id is random, even duplicate order_id can create multiple records."""
+    def test_duplicate_order_id_creates_multiple_shipments(self):
         event = {
             "order_id": "ORDDUP",
-            "origin_warehouse_id": "WH1",
-            "destination_warehouse_id": "WH2"
+            "origin": {"lat": 6.9, "lng": 79.8},
+            "destination": {"lat": 7.3, "lng": 80.6},
+            "demand": 50
         }
         handle_order_created(event)
         handle_order_created(event)
         self.assertEqual(Shipment.objects.filter(order_id="ORDDUP").count(), 2)
 
-    def test_extra_fields_are_ignored(self):
-        """Extra fields in the event should not break creation."""
+    def test_extra_fields_are_ignored_and_demand_saved(self):
         event = {
             "order_id": "ORD004",
-            "origin_warehouse_id": "WH1",
-            "destination_warehouse_id": "WH2",
+            "origin": {"lat": 6.9, "lng": 79.8},
+            "destination": {"lat": 7.3, "lng": 80.6},
             "customer_priority": "high",
-            "notes": "this is ignored"
+            "notes": "this should be ignored",
+            "demand": 60
         }
         handle_order_created(event)
-        self.assertTrue(Shipment.objects.filter(order_id="ORD004").exists())
+        shipment = Shipment.objects.get(order_id="ORD004")
+        self.assertEqual(shipment.demand, 60)
 
-    def test_empty_event_dict(self):
-        """An empty dict should be gracefully ignored."""
+    def test_event_with_no_fields_does_nothing(self):
         handle_order_created({})
         self.assertEqual(Shipment.objects.count(), 0)
 
-    def test_null_values(self):
-        """Null values should not create shipments."""
+    def test_null_values_are_ignored(self):
         event = {
             "order_id": None,
-            "origin_warehouse_id": None,
-            "destination_warehouse_id": None,
+            "origin": None,
+            "destination": None,
+            "demand": None
         }
         handle_order_created(event)
         self.assertEqual(Shipment.objects.count(), 0)
+
+    def test_negative_demand_defaults_to_zero(self):
+        event = {
+            "order_id": "ORD_NEG",
+            "origin": {"lat": 6.9, "lng": 79.8},
+            "destination": {"lat": 7.3, "lng": 80.6},
+            "demand": -5
+        }
+        handle_order_created(event)
+        shipment = Shipment.objects.get(order_id="ORD_NEG")
+        self.assertEqual(shipment.demand, 0)
+
+    def test_missing_demand_defaults_to_zero(self):
+        event = {
+            "order_id": "ORD_NO_DEMAND",
+            "origin": {"lat": 6.9, "lng": 79.8},
+            "destination": {"lat": 7.3, "lng": 80.6}
+        }
+        handle_order_created(event)
+        shipment = Shipment.objects.get(order_id="ORD_NO_DEMAND")
+        self.assertEqual(shipment.demand, 0)

@@ -4,30 +4,40 @@ from .models import Vehicle, VehicleLocation
 
 @admin.register(Vehicle)
 class VehicleAdmin(admin.ModelAdmin):
-    list_display = ('vehicle_id', 'name', 'capacity', 'status', 'fuel_type', 'last_location_update')
+    list_display = (
+        'vehicle_id', 'name', 'capacity', 'status', 'fuel_type',
+        'depot_id', 'depot_latitude', 'depot_longitude', 'last_location_update'
+    )
     list_filter = ('status', 'fuel_type')
-    search_fields = ('vehicle_id', 'name', 'plate_number')
+    search_fields = ('vehicle_id', 'name', 'plate_number', 'depot_id')
     readonly_fields = ('created_at', 'updated_at', 'last_location_update')
+
     fieldsets = (
         ('Basic Information', {
-            'fields': ('vehicle_id', 'name', 'plate_number', 'year_of_manufacture')
+            'fields': (
+                'vehicle_id', 'name', 'plate_number',
+                'year_of_manufacture', 'status'
+            )
+        }),
+        ('Depot Assignment', {
+            'fields': ('depot_id', 'depot_latitude', 'depot_longitude')
         }),
         ('Specifications', {
             'fields': ('capacity', 'fuel_type', 'max_speed', 'fuel_efficiency')
         }),
-        ('Status & Location', {
-            'fields': ('status', 'current_latitude', 'current_longitude', 'last_location_update')
+        ('Current Location', {
+            'fields': ('current_latitude', 'current_longitude', 'last_location_update')
         }),
         ('Timestamps', {
             'fields': ('created_at', 'updated_at'),
             'classes': ('collapse',)
-        })
+        }),
     )
 
 
 @admin.register(VehicleLocation)
 class VehicleLocationAdmin(admin.ModelAdmin):
-    list_display = ('vehicle', 'timestamp', 'latitude', 'longitude', 'speed')
+    list_display = ('vehicle', 'timestamp', 'latitude', 'longitude', 'speed', 'heading')
     list_filter = ('timestamp',)
     search_fields = ('vehicle__vehicle_id',)
     raw_id_fields = ('vehicle',)

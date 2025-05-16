@@ -1,11 +1,10 @@
 from django.test import TestCase
-from rest_framework.test import APIClient
-
 from fleet.models import Vehicle
+from django.utils import timezone
 
 
 class VehicleModelTest(TestCase):
-    """Test vehicle model functionality."""
+    """Unit tests for the Vehicle model."""
 
     def setUp(self):
         self.vehicle = Vehicle.objects.create(
@@ -19,29 +18,38 @@ class VehicleModelTest(TestCase):
             fuel_efficiency=8.5
         )
 
-    def test_vehicle_creation(self):
-        """Test that vehicle can be created."""
-        self.assertEqual(self.vehicle.vehicle_id, "TRK001")
-        self.assertEqual(self.vehicle.capacity, 1000)
-        self.assertEqual(self.vehicle.status, "available")
-        self.assertTrue(self.vehicle.is_available)
+    def test_vehicle_fields_and_defaults(self):
+        """Test vehicle creation and default values."""
+        v = self.vehicle
+        self.assertEqual(v.vehicle_id, "TRK001")
+        self.assertEqual(v.name, "Test Truck 1")
+        self.assertEqual(v.capacity, 1000)
+        self.assertEqual(v.status, "available")
+        self.assertEqual(v.fuel_type, "diesel")
+        self.assertTrue(v.is_available)
+        self.assertIsNone(v.current_latitude)
+        self.assertIsNone(v.current_longitude)
+        self.assertIsNone(v.last_location_update)
 
-    def test_update_location(self):
-        """Test updating vehicle location."""
-        # Initial location should be None
-        self.assertIsNone(self.vehicle.current_latitude)
-        self.assertIsNone(self.vehicle.current_longitude)
+    def test_update_location_sets_values_and_timestamp(self):
+        """Test updating vehicle's current location."""
+        lat, lon = 45.123456, -75.654321
 
-        # Update location
-        latitude = 45.123456
-        longitude = -75.654321
+        self.vehicle.update_location(lat, lon)
+        self.vehicle.refresh_from_db()
 
-        self.vehicle.update_location(latitude, longitude)
-
-        # Check that location was updated
-        self.assertEqual(float(self.vehicle.current_latitude), latitude)
-        self.assertEqual(float(self.vehicle.current_longitude), longitude)
+        self.assertEqual(float(self.vehicle.current_latitude), lat)
+        self.assertEqual(float(self.vehicle.current_longitude), lon)
         self.assertIsNotNone(self.vehicle.last_location_update)
 
-        # Check that location isn't stale right after update
+        now = timezone.now()
+        self.assertLess(abs((now - self.vehicle.last_location_update).total_seconds()), 5)
+
+    def test_location_is_stale_logic(self):
+        """Test location_is_stale property."""
+        # Initially: no location update → should be stale
+        self.assertTrue(self.vehicle.location_is_stale)
+
+        # After updating location → should not be stale
+        self.vehicle.update_location(10.0, 20.0)
         self.assertFalse(self.vehicle.location_is_stale)

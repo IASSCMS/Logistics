@@ -2,6 +2,7 @@ from django.db import models
 from django.utils import timezone
 from django.core.exceptions import ValidationError
 
+
 class Shipment(models.Model):
     STATUS_CHOICES = [
         ('pending', 'Pending'),
@@ -14,8 +15,12 @@ class Shipment(models.Model):
 
     shipment_id = models.CharField(max_length=32, unique=True)
     order_id = models.CharField(max_length=32)  # Reference to order service
-    origin_warehouse_id = models.CharField(max_length=36)
-    destination_warehouse_id = models.CharField(max_length=36)
+
+    origin = models.JSONField()
+    destination = models.JSONField()
+
+    demand = models.PositiveIntegerField(help_text="Amount of load required for this shipment (e.g., in kg or units)", default=0)
+
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     scheduled_dispatch = models.DateTimeField(null=True, blank=True)
     actual_dispatch = models.DateTimeField(null=True, blank=True)

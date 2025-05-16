@@ -4,7 +4,7 @@ Tests for Dijkstra's algorithm implementation.
 This module contains tests for the DijkstraPathFinder class.
 """
 import unittest
-from route_optimizer.core.dijkstra import DijkstraPathFinder
+from route_optimizer.utils.dijkstra import DijkstraPathFinder
 
 
 class TestDijkstraPathFinder(unittest.TestCase):
